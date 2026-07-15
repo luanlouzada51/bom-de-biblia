@@ -641,7 +641,7 @@ function HomeScreen({ profile, lang, onPlay, onLangChange, onProfileUpdate }: {
               <button onClick={() => setConfirmLogout(false)} className="text-white/50 text-xs font-bold hover:text-white/80 transition-colors">{t.abandonNo}</button>
             </div>
           ) : (
-            <button onClick={() => setConfirmLogout(true)} className="text-white/30 hover:text-white/60 px-3 py-1 text-xs rounded-full border border-white/10 transition-colors" title={t.signOut}>
+            <button onClick={() => setConfirmLogout(true)} className="text-white/80 hover:text-white px-3 py-1 text-xs rounded-full border border-white/10 bg-white/5 hover:bg-white/10 transition-all" title={t.signOut}>
               {t.signOut}
             </button>
           )}

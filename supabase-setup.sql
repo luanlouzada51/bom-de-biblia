@@ -118,6 +118,7 @@ CREATE INDEX IF NOT EXISTS idx_scores_user_id   ON scores(user_id);
 CREATE INDEX IF NOT EXISTS idx_scores_played_at ON scores(played_at DESC);
 CREATE INDEX IF NOT EXISTS idx_scores_score     ON scores(score DESC);
 CREATE INDEX IF NOT EXISTS idx_profiles_code    ON profiles(friend_code);
+CREATE UNIQUE INDEX IF NOT EXISTS idx_profiles_username_lower ON profiles (LOWER(username));
 CREATE INDEX IF NOT EXISTS idx_friendships_uid  ON friendships(user_id);
 CREATE INDEX IF NOT EXISTS idx_freq_to_user     ON friend_requests(to_user_id, status);
 

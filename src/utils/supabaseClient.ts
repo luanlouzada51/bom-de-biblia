@@ -128,8 +128,19 @@ export async function checkDbReady(): Promise<boolean> {
   return !error || (!error.message?.includes('does not exist') && error.code !== '42P01');
 }
 
+async function isUsernameTaken(username: string, exceptUserId?: string): Promise<boolean> {
+  let q = supabase.from('profiles').select('id').ilike('username', username).limit(1);
+  if (exceptUserId) q = q.neq('id', exceptUserId);
+  const { data, error } = await q;
+  if (error) throw error;
+  return Array.isArray(data) && data.length > 0;
+}
+
 export async function createProfile(userId: string, username: string, avatar: string): Promise<AuthError> {
   try {
+    if (await isUsernameTaken(username)) {
+      return 'Username already taken.';
+    }
     const { error } = await supabase.from('profiles').insert({
       id: userId,
       username,
@@ -139,11 +150,17 @@ export async function createProfile(userId: string, username: string, avatar: st
     if (!error) return null;
     const msg = extractMessage(error);
     // If friend_code conflict, retry once
-    if (msg.includes('friend_code') || msg.includes('duplicate')) {
+    if (msg.includes('friend_code')) {
       const { error: e2 } = await supabase.from('profiles').insert({
         id: userId, username, avatar, friend_code: generateFriendCode(),
       });
-      return e2 ? extractMessage(e2) : null;
+      if (!e2) return null;
+      const msg2 = extractMessage(e2);
+      if (msg2.includes('username') || msg2.includes('duplicate')) return 'Username already taken.';
+      return msg2;
+    }
+    if (msg.includes('username') || msg.includes('duplicate')) {
+      return 'Username already taken.';
     }
     // If table doesn't exist, give a clear hint
     if (msg.includes('does not exist') || msg.includes('42P01')) {
@@ -155,8 +172,18 @@ export async function createProfile(userId: string, username: string, avatar: st
   }
 }
 
-export async function updateProfile(userId: string, username: string, avatar: string): Promise<void> {
-  await supabase.from('profiles').update({ username, avatar }).eq('id', userId);
+export async function updateProfile(userId: string, username: string, avatar: string): Promise<AuthError> {
+  try {
+    if (await isUsernameTaken(username, userId)) {
+      return 'Username already taken.';
+    }
+    const { error } = await supabase.from('profiles').update({ username, avatar }).eq('id', userId);
+    if (!error) return null;
+    const msg = extractMessage(error);
+    return msg.includes('username') || msg.includes('duplicate') ? 'Username already taken.' : msg;
+  } catch (e: any) {
+    return extractMessage(e);
+  }
 }
 
 // ─── Scores ───────────────────────────────────────────────────────────────────

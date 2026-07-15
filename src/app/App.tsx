@@ -112,6 +112,7 @@ const i18n = {
     yourName: 'Your game name', namePlaceholder: 'What should we call you?',
     chooseAvatar: 'Choose your avatar', saveProfile: 'Save & Play',
     nameRequired: 'Enter your name',
+    usernameTaken: 'This username is already taken. Please choose another.',
     tabPlay: 'Play', tabRanking: 'Ranking', tabFriends: 'Friends',
     playNow: 'PLAY NOW',
     yourCode: 'Your friend code', copyCode: 'Copy', copied: 'Copied!',
@@ -157,6 +158,7 @@ const i18n = {
     yourName: 'Tu nombre en el juego', namePlaceholder: '¿Cómo quieres que te llamen?',
     chooseAvatar: 'Elige tu avatar', saveProfile: 'Guardar y Jugar',
     nameRequired: 'Ingresa tu nombre',
+    usernameTaken: 'Este nombre de usuario ya está en uso. Elige otro.',
     tabPlay: 'Jugar', tabRanking: 'Ranking', tabFriends: 'Amigos',
     playNow: 'JUGAR AHORA',
     yourCode: 'Tu código de amigo', copyCode: 'Copiar', copied: '¡Copiado!',
@@ -297,6 +299,7 @@ function AuthScreen({ lang, onLangChange, dbWarning, recoveryMode }: { lang: Lan
   const t = i18n[lang];
   const [mode, setMode] = useState<AuthMode>(recoveryMode ? 'new-password' : 'signin');
   const [email, setEmail] = useState('');
+  const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [confirm, setConfirm] = useState('');
   const [loading, setLoading] = useState(false);
@@ -310,6 +313,7 @@ function AuthScreen({ lang, onLangChange, dbWarning, recoveryMode }: { lang: Lan
       return true;
     }
     if (!email.includes('@')) { setError(t.emailInvalid); return false; }
+    if (mode === 'signup' && !username.trim()) { setError(t.nameRequired); return false; }
     if (mode !== 'reset' && password.length < 6) { setError(t.passwordShort); return false; }
     if (mode === 'signup' && password !== confirm) { setError(t.passwordMismatch); return false; }
     return true;
@@ -342,6 +346,9 @@ function AuthScreen({ lang, onLangChange, dbWarning, recoveryMode }: { lang: Lan
     const err = mode === 'signin'
       ? await signIn(email, password)
       : await signUp(email, password);
+    if (!err && mode === 'signup') {
+      localStorage.setItem('bom-biblia-signup-username', username.trim());
+    }
     setLoading(false);
 
     if (err) {
@@ -408,6 +415,18 @@ function AuthScreen({ lang, onLangChange, dbWarning, recoveryMode }: { lang: Lan
                 type="email" value={email} onChange={e => { setEmail(e.target.value); setError(''); }}
                 onKeyDown={e => e.key === 'Enter' && handle()}
                 placeholder={t.emailPlaceholder}
+                className="bg-white/10 border border-white/20 rounded-xl px-4 py-3 text-white placeholder-white/30 text-sm focus:outline-none focus:ring-2 focus:ring-blue-400 transition-all"
+              />
+            </div>
+          )}
+
+          {mode === 'signup' && (
+            <div className="flex flex-col gap-1">
+              <label className="text-white/60 text-xs font-bold uppercase tracking-widest">{t.yourName}</label>
+              <input
+                type="text" value={username} onChange={e => { setUsername(e.target.value); setError(''); }}
+                onKeyDown={e => e.key === 'Enter' && handle()}
+                placeholder={t.namePlaceholder}
                 className="bg-white/10 border border-white/20 rounded-xl px-4 py-3 text-white placeholder-white/30 text-sm focus:outline-none focus:ring-2 focus:ring-blue-400 transition-all"
               />
             </div>
@@ -489,11 +508,19 @@ function ProfileSetupScreen({ userId, lang, onDone }: {
   const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
 
+  useEffect(() => {
+    const savedUsername = localStorage.getItem('bom-biblia-signup-username');
+    if (savedUsername) {
+      setName(savedUsername);
+      localStorage.removeItem('bom-biblia-signup-username');
+    }
+  }, []);
+
   const handle = async () => {
     if (!name.trim()) { setError(t.nameRequired); return; }
     setLoading(true);
     const err = await createProfile(userId, name.trim(), avatar);
-    if (err) { setError(err); setLoading(false); return; }
+    if (err) { setError(err === 'Username already taken.' ? t.usernameTaken : err); setLoading(false); return; }
     const profile = await getProfile(userId);
     setLoading(false);
     if (profile) onDone(profile);
@@ -548,12 +575,14 @@ function EditProfileModal({ profile, lang, onSave, onClose }: {
   const t = i18n[lang];
   const [name, setName] = useState(profile.username);
   const [avatar, setAvatar] = useState(profile.avatar);
+  const [error, setError] = useState('');
   const [loading, setLoading] = useState(false);
 
   const handle = async () => {
     if (!name.trim()) return;
     setLoading(true);
-    await updateProfile(profile.id, name.trim(), avatar);
+    const err = await updateProfile(profile.id, name.trim(), avatar);
+    if (err) { setError(err === 'Username already taken.' ? t.usernameTaken : err); setLoading(false); return; }
     onSave({ ...profile, username: name.trim(), avatar });
     setLoading(false);
     onClose();
@@ -572,6 +601,7 @@ function EditProfileModal({ profile, lang, onSave, onClose }: {
           <input value={name} onChange={e => setName(e.target.value)} maxLength={20}
             className="flex-1 bg-transparent text-white placeholder-white/30 font-bold text-base focus:outline-none" />
         </div>
+        {error && <p className="text-red-400 text-xs">{error}</p>}
 
         <div className="grid grid-cols-10 gap-1.5">
           {AVATARS.map(a => (

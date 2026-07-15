@@ -19,6 +19,7 @@ function figmaAssetResolver() {
 }
 
 export default defineConfig({
+  base: '/bom-de-biblia/',
   plugins: [
     figmaAssetResolver(),
     // The React and Tailwind plugins are both required for Make, even if

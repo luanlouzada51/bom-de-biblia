@@ -1,0 +1,184 @@
+{
+  "questions": [
+    {
+      "id": "a1b2c3d4-e5f6-7890-1234-000000000001",
+      "language": "pt-BR",
+      "theme": "pentateuco",
+      "level": "facil",
+      "questionText": "Quem recebeu os Dez Mandamentos de Deus no Monte Sinai?",
+      "options": [
+        "Noé",
+        "Adão",
+        "Abraão",
+        "Moisés"
+      ],
+      "correctAnswerIndex": 3,
+      "explanation": "Moisés recebeu as tábuas da lei diretamente de Deus no Monte Sinai, conforme Êxodo 20."
+    },
+    {
+      "id": "a1b2c3d4-e5f6-7890-1234-000000000002",
+      "language": "en-US",
+      "theme": "evangelicos",
+      "level": "facil",
+      "questionText": "Where was Jesus born?",
+      "options": [
+        "Jerusalem",
+        "Nazareth",
+        "Bethlehem",
+        "Galilee"
+      ],
+      "correctAnswerIndex": 2,
+      "explanation": "Jesus was born in Bethlehem, as prophesied in the Old Testament and recorded in the Gospels of Matthew and Luke."
+    },
+    {
+      "id": "a1b2c3d4-e5f6-7890-1234-000000000003",
+      "language": "es-LA",
+      "theme": "historicos",
+      "level": "medio",
+      "questionText": "¿Quién fue la única jueza de Israel mencionada en la Biblia?",
+      "options": [
+        "Ester",
+        "Rut",
+        "Débora",
+        "Jael"
+      ],
+      "correctAnswerIndex": 2,
+      "explanation": "Débora fue una profetisa y la única mujer que sirvió como jueza de Israel, liderando a la nación en una victoria militar."
+    },
+    {
+      "id": "a1b2c3d4-e5f6-7890-1234-000000000004",
+      "language": "pt-BR",
+      "theme": "cartas",
+      "level": "medio",
+      "questionText": "Em qual carta o apóstolo Paulo fala sobre o 'Fruto do Espírito'?",
+      "options": [
+        "Romanos",
+        "Gálatas",
+        "Efésios",
+        "Coríntios"
+      ],
+      "correctAnswerIndex": 1,
+      "explanation": "A famosa passagem sobre o Fruto do Espírito (amor, alegria, paz...) está em Gálatas 5:22-23."
+    },
+    {
+      "id": "a1b2c3d4-e5f6-7890-1234-000000000005",
+      "language": "en-US",
+      "theme": "profeticos",
+      "level": "dificil",
+      "questionText": "Which prophet saw a vision of a valley of dry bones?",
+      "options": [
+        "Isaiah",
+        "Jeremiah",
+        "Daniel",
+        "Ezekiel"
+      ],
+      "correctAnswerIndex": 3,
+      "explanation": "Ezekiel was given a vision of a valley of dry bones that came back to life, symbolizing God's power to restore Israel (Ezekiel 37)."
+    },
+    {
+      "id": "a1b2c3d4-e5f6-7890-1234-000000000006",
+      "language": "es-LA",
+      "theme": "poeticos",
+      "level": "dificil",
+      "questionText": "En el libro de Proverbios, ¿qué se dice que es 'el principio de la sabiduría'?",
+      "options": [
+        "La riqueza",
+        "El poder",
+        "El temor de Jehová",
+        "El conocimiento"
+      ],
+      "correctAnswerIndex": 2,
+      "explanation": "Proverbios 1:7 y 9:10 establecen que 'El principio de la sabiduría es el temor de Jehová'."
+    },
+    {
+      "id": "a1b2c3d4-e5f6-7890-1234-000000000007",
+      "language": "pt-BR",
+      "theme": "historicos",
+      "level": "dificil",
+      "questionText": "Quem liderou a reconstrução dos muros de Jerusalém após o exílio babilônico?",
+      "options": [
+        "Esdras",
+        "Zorobabel",
+        "Neemias",
+        "Daniel"
+      ],
+      "correctAnswerIndex": 2,
+      "explanation": "Neemias, copeiro do rei Artaxerxes, recebeu permissão para retornar a Jerusalém e liderar a monumental tarefa de reconstruir seus muros."
+    },
+    {
+      "id": "a1b2c3d4-e5f6-7890-1234-000000000008",
+      "language": "en-US",
+      "theme": "cartas",
+      "level": "expert",
+      "questionText": "In the book of Philemon, what is the name of the runaway slave Paul is writing about?",
+      "options": [
+        "Tychicus",
+        "Onesimus",
+        "Epaphras",
+        "Demas"
+      ],
+      "correctAnswerIndex": 1,
+      "explanation": "The entire letter to Philemon is an appeal from Paul on behalf of Onesimus, Philemon's runaway slave who became a Christian."
+    },
+    {
+      "id": "a1b2c3d4-e5f6-7890-1234-000000000009",
+      "language": "es-LA",
+      "theme": "pentateuco",
+      "level": "expert",
+      "questionText": "Según Génesis, ¿quién fue Melquisedec, rey de Salem, que se encontró con Abraham?",
+      "options": [
+        "Un rey heteo",
+        "Un ángel de Dios",
+        "El faraón de Egipto",
+        "Sacerdote del Dios Altísimo"
+      ],
+      "correctAnswerIndex": 3,
+      "explanation": "Melquisedec es una figura misteriosa descrita en Génesis 14 como rey de Salem y 'sacerdote del Dios Altísimo', quien bendijo a Abraham."
+    },
+    {
+      "id": "a1b2c3d4-e5f6-7890-1234-000000000010",
+      "language": "pt-BR",
+      "theme": "poeticos",
+      "level": "expert",
+      "questionText": "Qual o único Salmo explicitamente atribuído a Moisés?",
+      "options": [
+        "Salmo 1",
+        "Salmo 23",
+        "Salmo 90",
+        "Salmo 119"
+      ],
+      "correctAnswerIndex": 2,
+      "explanation": "O Salmo 90 é o único no livro dos Salmos cujo cabeçalho o atribui diretamente a 'Moisés, homem de Deus'."
+    },
+    {
+      "id": "a1b2c3d4-e5f6-7890-1234-000000000011",
+      "language": "en-US",
+      "theme": "evangelicos",
+      "level": "dificil",
+      "questionText": "To whom did Jesus say, 'You must be born again' to see the kingdom of God?",
+      "options": [
+        "Peter",
+        "A Samaritan woman",
+        "Nicodemus",
+        "Zacchaeus"
+      ],
+      "correctAnswerIndex": 2,
+      "explanation": "Jesus had a famous nocturnal conversation with Nicodemus, a member of the Sanhedrin, explaining the concept of spiritual rebirth (John 3)."
+    },
+    {
+      "id": "a1b2c3d4-e5f6-7890-1234-000000000012",
+      "language": "es-LA",
+      "theme": "profeticos",
+      "level": "medio",
+      "questionText": "¿Qué profeta fue llamado por Dios siendo apenas un niño y escuchó su voz en el templo?",
+      "options": [
+        "Isaías",
+        "Samuel",
+        "Jeremías",
+        "Oseas"
+      ],
+      "correctAnswerIndex": 1,
+      "explanation": "El libro de 1 Samuel relata cómo el joven Samuel escuchó la voz de Dios llamándolo por la noche mientras servía en el templo bajo el sacerdote Elí."
+    }
+  ]
+}

@@ -56,11 +56,24 @@ CREATE TABLE IF NOT EXISTS friendships (
   UNIQUE(user_id, friend_id)
 );
 
+CREATE TABLE IF NOT EXISTS reports (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  reporter_id UUID NOT NULL REFERENCES profiles(id) ON DELETE CASCADE,
+  reported_user_id UUID NOT NULL REFERENCES profiles(id) ON DELETE CASCADE,
+  reason TEXT,
+  status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending','reviewed','dismissed')),
+  created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_reports_reported_user_id ON reports(reported_user_id);
+CREATE INDEX IF NOT EXISTS idx_reports_status ON reports(status);
+
 -- ── RLS ──────────────────────────────────────────────────────────────────────
 ALTER TABLE profiles ENABLE ROW LEVEL SECURITY;
 ALTER TABLE scores ENABLE ROW LEVEL SECURITY;
 ALTER TABLE friend_requests ENABLE ROW LEVEL SECURITY;
 ALTER TABLE friendships ENABLE ROW LEVEL SECURITY;
+ALTER TABLE reports ENABLE ROW LEVEL SECURITY;
 
 -- Profiles
 DROP POLICY IF EXISTS profiles_select ON profiles;
@@ -96,6 +109,14 @@ CREATE POLICY friendships_select ON friendships FOR SELECT TO authenticated
 CREATE POLICY friendships_insert ON friendships FOR INSERT TO authenticated WITH CHECK (true);
 CREATE POLICY friendships_delete ON friendships FOR DELETE TO authenticated
   USING (auth.uid() = user_id OR auth.uid() = friend_id);
+
+-- Reports
+DROP POLICY IF EXISTS reports_select ON reports;
+DROP POLICY IF EXISTS reports_insert ON reports;
+CREATE POLICY reports_select ON reports FOR SELECT TO authenticated
+  USING (auth.uid() = reporter_id);
+CREATE POLICY reports_insert ON reports FOR INSERT TO authenticated
+  WITH CHECK (auth.uid() = reporter_id);
 
 -- ── Gerador de código de crente ───────────────────────────────────────────────
 CREATE OR REPLACE FUNCTION generate_friend_code()

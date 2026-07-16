@@ -9,7 +9,7 @@ import {
   saveScore, getGlobalRanking, getMyBestScore, getFriendsWeeklyBest,
   searchProfileByCode, sendFriendRequest,
   getPendingRequests, getSentRequests, respondToRequest,
-  getFriendships, removeFriend,
+  getFriendships, removeFriend, reportProfile,
 } from '../utils/supabaseClient';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
@@ -63,6 +63,11 @@ const i18n = {
     yourName: 'Seu nome no jogo', namePlaceholder: 'Como quer ser chamado?',
     chooseAvatar: 'Escolha seu avatar', saveProfile: 'Salvar e Jogar',
     nameRequired: 'Digite seu nome',
+    confirmUnfriend: 'Tem certeza que deseja desfazer amizade?',
+    friendRemoved: 'Amizade desfeita',
+    report: 'Denunciar',
+    reportSent: 'Denúncia enviada para revisão',
+    unfriend: 'Desfazer amizade',
     // Home
     tabPlay: 'Jogar', tabRanking: 'Ranking', tabFriends: 'Amigos',
     playNow: 'JOGAR AGORA',
@@ -112,6 +117,11 @@ const i18n = {
     yourName: 'Your game name', namePlaceholder: 'What should we call you?',
     chooseAvatar: 'Choose your avatar', saveProfile: 'Save & Play',
     nameRequired: 'Enter your name',
+    confirmUnfriend: 'Are you sure you want to remove this friend?',
+    friendRemoved: 'Friend removed',
+    report: 'Report',
+    reportSent: 'Report sent for review',
+    unfriend: 'Remove friend',
     usernameTaken: 'This username is already taken. Please choose another.',
     tabPlay: 'Play', tabRanking: 'Ranking', tabFriends: 'Friends',
     playNow: 'PLAY NOW',
@@ -158,6 +168,11 @@ const i18n = {
     yourName: 'Tu nombre en el juego', namePlaceholder: '¿Cómo quieres que te llamen?',
     chooseAvatar: 'Elige tu avatar', saveProfile: 'Guardar y Jugar',
     nameRequired: 'Ingresa tu nombre',
+    confirmUnfriend: '¿Seguro que quieres eliminar esta amistad?',
+    friendRemoved: 'Amistad eliminada',
+    report: 'Denunciar',
+    reportSent: 'Denuncia enviada para revisión',
+    unfriend: 'Eliminar amigo',
     usernameTaken: 'Este nombre de usuario ya está en uso. Elige otro.',
     tabPlay: 'Jugar', tabRanking: 'Ranking', tabFriends: 'Amigos',
     playNow: 'JUGAR AHORA',
@@ -820,6 +835,7 @@ function FriendsTab({ t, profile }: { t: typeof i18n.pt; profile: Profile }) {
   const [searchResult, setSearchResult] = useState<Profile | null | 'not_found'>(null);
   const [msg, setMsg] = useState<{ text: string; ok: boolean } | null>(null);
   const [addOpen, setAddOpen] = useState(false);
+  const [confirmRemoveFriendId, setConfirmRemoveFriendId] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     const [fr, pe, se] = await Promise.all([
@@ -856,6 +872,19 @@ function FriendsTab({ t, profile }: { t: typeof i18n.pt; profile: Profile }) {
   const doRespond = async (req: FriendRequest, accept: boolean) => {
     await respondToRequest(req.id, accept, req.from_user_id, req.to_user_id);
     load();
+  };
+
+  const handleRemoveFriend = async (friendId: string) => {
+    await removeFriend(profile.id, friendId);
+    setConfirmRemoveFriendId(null);
+    flash(t.friendRemoved, true);
+    load();
+  };
+
+  const handleReportFriend = async (friendId: string) => {
+    const err = await reportProfile(profile.id, friendId);
+    if (err) flash(err, false);
+    else flash(t.reportSent, true);
   };
 
   return (
@@ -970,8 +999,24 @@ function FriendsTab({ t, profile }: { t: typeof i18n.pt; profile: Profile }) {
                         {best ? best.toLocaleString() : t.noScoreYet}
                       </p>
                     </div>
-                    <button onClick={() => removeFriend(profile.id, f.friend_id).then(load)}
-                      className="text-white/15 hover:text-red-400 text-sm transition-all ml-1 px-1 py-1">✕</button>
+                    {confirmRemoveFriendId === f.friend_id ? (
+                      <div className="flex items-center gap-2">
+                        <span className="text-red-300 text-xs font-bold">{t.confirmUnfriend}</span>
+                        <button onClick={() => handleRemoveFriend(f.friend_id)}
+                          className="text-red-300 text-xs font-black hover:text-red-200 transition-colors">{t.abandonYes}</button>
+                        <button onClick={() => setConfirmRemoveFriendId(null)}
+                          className="text-white/50 text-xs font-bold hover:text-white/80 transition-colors">{t.abandonNo}</button>
+                      </div>
+                    ) : (
+                      <div className="flex items-center gap-2">
+                        <button onClick={() => setConfirmRemoveFriendId(f.friend_id)}
+                          className="text-white/15 hover:text-red-400 text-sm transition-all ml-1 px-1 py-1" title={t.unfriend}>✕</button>
+                        <button onClick={() => handleReportFriend(f.friend_id)}
+                          className="text-white/30 hover:text-white/70 text-xs font-bold px-2 py-1 rounded-full border border-white/10 transition-all">
+                          {t.report}
+                        </button>
+                      </div>
+                    )}
                   </div>
                 );
               })}

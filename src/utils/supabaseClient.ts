@@ -287,3 +287,16 @@ export async function removeFriend(userId: string, friendId: string): Promise<vo
   await supabase.from('friendships').delete().eq('user_id', userId).eq('friend_id', friendId);
   await supabase.from('friendships').delete().eq('user_id', friendId).eq('friend_id', userId);
 }
+
+export async function reportProfile(reporterId: string, reportedUserId: string, reason = ''): Promise<AuthError> {
+  try {
+    const { error } = await supabase.from('reports').insert({
+      reporter_id: reporterId,
+      reported_user_id: reportedUserId,
+      reason,
+    });
+    return error ? extractMessage(error) : null;
+  } catch (e: any) {
+    return extractMessage(e);
+  }
+}

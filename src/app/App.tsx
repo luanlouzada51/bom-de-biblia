@@ -10,6 +10,7 @@ import {
   searchProfileByCode, sendFriendRequest,
   getPendingRequests, getSentRequests, respondToRequest,
   getFriendships, removeFriend, reportProfile,
+  listTournamentInvitesForUser,
 } from '../utils/supabaseClient';
 import CopaCristaoPage from './tournament/CopaCristaoPage';
 
@@ -650,9 +651,10 @@ function EditProfileModal({ profile, lang, onSave, onClose }: {
 
 // ─── Home Screen ──────────────────────────────────────────────────────────────
 
-function HomeScreen({ profile, lang, onPlay, onLangChange, onProfileUpdate }: {
+function HomeScreen({ profile, lang, onPlay, onLangChange, onProfileUpdate, pendingTournamentInvites }: {
   profile: Profile; lang: Lang; onPlay: () => void;
   onLangChange: (l: Lang) => void; onProfileUpdate: (p: Profile) => void;
+  pendingTournamentInvites: number;
 }) {
   const t = i18n[lang];
   const [tab, setTab] = useState<Tab>('play');
@@ -701,7 +703,7 @@ function HomeScreen({ profile, lang, onPlay, onLangChange, onProfileUpdate }: {
       </div>
 
       <div className="flex-1 overflow-y-auto px-4 pb-24">
-        {tab === 'play' && <PlayTab t={t} profile={profile} onPlay={onPlay} copyCode={copyCode} copied={copied} />}
+        {tab === 'play' && <PlayTab t={t} profile={profile} onPlay={onPlay} copyCode={copyCode} copied={copied} pendingTournamentInvites={pendingTournamentInvites} />}
         {tab === 'ranking' && <RankingTab t={t} profile={profile} />}
         {tab === 'friends' && <FriendsTab t={t} profile={profile} />}
       </div>
@@ -731,8 +733,8 @@ function HomeScreen({ profile, lang, onPlay, onLangChange, onProfileUpdate }: {
 
 // ─── Play Tab ─────────────────────────────────────────────────────────────────
 
-function PlayTab({ t, profile, onPlay, copyCode, copied }: {
-  t: typeof i18n.pt; profile: Profile; onPlay: () => void; copyCode: () => void; copied: boolean;
+function PlayTab({ t, profile, onPlay, copyCode, copied, pendingTournamentInvites }: {
+  t: typeof i18n.pt; profile: Profile; onPlay: () => void; copyCode: () => void; copied: boolean; pendingTournamentInvites: number;
 }) {
   const [showTournament, setShowTournament] = useState(false);
   const [myBest, setMyBest] = useState<ScoreRow | null>(null);
@@ -772,10 +774,15 @@ function PlayTab({ t, profile, onPlay, copyCode, copied }: {
         <p className="text-indigo-400/50 text-xs mt-1">{t.shareCode}</p>
       </div>
       <div className="mt-4">
-        <div className="bg-white/5 rounded-2xl p-4 border border-white/10 flex items-center justify-between">
+        <div className="bg-white/5 rounded-2xl p-4 border border-white/10 flex items-center justify-between gap-3">
           <div>
             <p className="text-white/60 text-xs uppercase tracking-widest">Copa Cristão</p>
             <p className="text-white font-black text-lg">Modo Torneio</p>
+            {pendingTournamentInvites > 0 && (
+              <p className="mt-1 inline-flex items-center gap-1 rounded-full bg-red-500/20 px-2 py-0.5 text-[10px] font-black uppercase tracking-widest text-red-200">
+                🔔 {pendingTournamentInvites} convite{pendingTournamentInvites > 1 ? 's' : ''} pendente{pendingTournamentInvites > 1 ? 's' : ''}
+              </p>
+            )}
           </div>
           <div className="flex gap-2">
             <button onClick={() => setShowTournament(true)} className="bg-blue-500 text-white py-2 px-3 rounded-2xl font-bold">Abrir</button>
@@ -1365,6 +1372,7 @@ export default function App() {
   const [lang, setLang] = useState<Lang>(loadLang);
   const [result, setResult] = useState({ score: 0, correct: 0, total: 0 });
   const [dbReady, setDbReady] = useState<boolean | null>(null);
+  const [pendingTournamentInvites, setPendingTournamentInvites] = useState(0);
   // true when a password-recovery link was clicked.
   // With Supabase PKCE the redirect URL has ?code=... (no type visible).
   // We block profile navigation until onAuthStateChange confirms the event type.
@@ -1402,6 +1410,26 @@ export default function App() {
 
     return () => subscription.unsubscribe();
   }, []);
+
+  useEffect(() => {
+    if (!profile) {
+      setPendingTournamentInvites(0);
+      return;
+    }
+
+    let cancelled = false;
+    const refreshInvites = async () => {
+      const rows = await listTournamentInvitesForUser(profile.id);
+      if (!cancelled) setPendingTournamentInvites(rows.length);
+    };
+
+    refreshInvites();
+    const timer = window.setInterval(refreshInvites, 4000);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+  }, [profile?.id]);
 
   // Load profile when session changes (skip during password recovery)
   useEffect(() => {
@@ -1478,7 +1506,8 @@ export default function App() {
     return <HomeScreen profile={profile} lang={lang}
       onPlay={() => setScreen('countdown')}
       onLangChange={handleLangChange}
-      onProfileUpdate={handleProfileUpdate} />;
+      onProfileUpdate={handleProfileUpdate}
+      pendingTournamentInvites={pendingTournamentInvites} />;
 
   return null;
 }

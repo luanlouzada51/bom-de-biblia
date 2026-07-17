@@ -19,7 +19,9 @@ function figmaAssetResolver() {
 }
 
 export default defineConfig({
-  base: '/bom-de-biblia/',
+  // Use repo base only in production build (GitHub Pages).
+  // In dev, keep root path to avoid white-screen when opening '/'.
+  base: process.env.NODE_ENV === 'production' ? '/bom-de-biblia/' : '/',
   plugins: [
     figmaAssetResolver(),
     // The React and Tailwind plugins are both required for Make, even if

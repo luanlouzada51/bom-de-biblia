@@ -255,6 +255,7 @@ export default function CopaCristaoPage({ profile, onClose }: { profile: Profile
   const [tournament, setTournament] = useState<TournamentState | null>(null);
   const [openTournaments, setOpenTournaments] = useState<TournamentState[]>([]);
   const [invites, setInvites] = useState<TournamentInviteRow[]>([]);
+  const [organizerInvites, setOrganizerInvites] = useState<TournamentInviteRow[]>([]);
   const [friends, setFriends] = useState<Friendship[]>([]);
   const [msg, setMsg] = useState<string | null>(null);
   const [now, setNow] = useState(Date.now());
@@ -272,6 +273,13 @@ export default function CopaCristaoPage({ profile, onClose }: { profile: Profile
     setOpenTournaments(openRows.map(fromRow));
     setInvites(myInvites);
     setFriends(fr);
+
+    if (tournament && tournament.organizerId === profile.id) {
+      const sent = await listTournamentInvitesForOrganizer(tournament.id);
+      setOrganizerInvites(sent);
+    } else {
+      setOrganizerInvites([]);
+    }
   }
 
   async function refreshCurrent() {
@@ -383,6 +391,9 @@ export default function CopaCristaoPage({ profile, onClose }: { profile: Profile
   const inviteFriend = async (friendId: string) => {
     if (!tournament) return;
     if (tournament.players.some(p => p.id === friendId)) return setMsg('Esse amigo j� entrou');
+    if (organizerInvites.some(inv => inv.invited_user_id === friendId && inv.status === 'pending')) {
+      return setMsg('Esse amigo j� foi convidado');
+    }
     const err = await createTournamentInvite(tournament.id, profile.id, friendId);
     if (err) setMsg(err); else setMsg('Convite enviado');
     refreshGlobal();
@@ -650,9 +661,27 @@ export default function CopaCristaoPage({ profile, onClose }: { profile: Profile
                       {friends.filter(f => !!f.friend_profile).map(f => (
                         <div key={f.id} className="rounded-xl border border-white/10 bg-slate-950/40 p-2 flex items-center justify-between">
                           <span className="text-white text-sm">{f.friend_profile?.avatar} {f.friend_profile?.username}</span>
-                          <button onClick={() => inviteFriend(f.friend_id)} className="rounded-lg bg-blue-500 px-2 py-1 text-white text-xs font-bold">Convidar</button>
+                          {organizerInvites.some(inv => inv.invited_user_id === f.friend_id && inv.status === 'pending') ? (
+                            <span className="rounded-lg bg-emerald-500/20 px-2 py-1 text-emerald-300 text-xs font-bold">Convidado</span>
+                          ) : (
+                            <button onClick={() => inviteFriend(f.friend_id)} className="rounded-lg bg-blue-500 px-2 py-1 text-white text-xs font-bold">Convidar</button>
+                          )}
                         </div>
                       ))}
+                    </div>
+
+                    <div className="mt-4 border-t border-white/10 pt-4">
+                      <p className="text-white font-black mb-2">Convites enviados</p>
+                      <div className="space-y-2 max-h-40 overflow-y-auto">
+                        {organizerInvites.length === 0 ? (
+                          <p className="text-white/40 text-sm">Nenhum convite enviado ainda</p>
+                        ) : organizerInvites.map(inv => (
+                          <div key={inv.id} className="rounded-xl border border-white/10 bg-slate-950/40 p-2 flex items-center justify-between">
+                            <span className="text-white text-sm">{friends.find(f => f.friend_id === inv.invited_user_id)?.friend_profile?.username || inv.invited_user_id.slice(0, 8)}</span>
+                            <span className="text-emerald-300 text-xs font-bold">Pendente</span>
+                          </div>
+                        ))}
+                      </div>
                     </div>
                   </div>
                 )}

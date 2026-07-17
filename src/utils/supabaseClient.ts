@@ -326,6 +326,44 @@ export type TournamentInviteRow = {
   responded_at: string | null;
 };
 
+const TOURNAMENT_STATE_FALLBACK_KEY = 'bom-biblia-tournament-states-fallback';
+const TOURNAMENT_INVITE_FALLBACK_KEY = 'bom-biblia-tournament-invites-fallback';
+
+function isMissingTournamentTables(message: string | null | undefined): boolean {
+  if (!message) return false;
+  const m = message.toLowerCase();
+  return (
+    m.includes("could not find the table 'public.tournament_states'") ||
+    m.includes("could not find the table 'public.tournament_invites'") ||
+    m.includes('relation "tournament_states" does not exist') ||
+    m.includes('relation "tournament_invites" does not exist') ||
+    m.includes('42p01')
+  );
+}
+
+function nowIso(): string {
+  return new Date().toISOString();
+}
+
+function readFallbackRows<T>(key: string): T[] {
+  try {
+    return JSON.parse(localStorage.getItem(key) || '[]') as T[];
+  } catch {
+    return [];
+  }
+}
+
+function writeFallbackRows<T>(key: string, rows: T[]): void {
+  localStorage.setItem(key, JSON.stringify(rows));
+}
+
+function fallbackId(prefix: string): string {
+  if (typeof crypto !== 'undefined' && 'randomUUID' in crypto) {
+    return `${prefix}-${crypto.randomUUID()}`;
+  }
+  return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`;
+}
+
 export async function createTournamentState(
   code: string,
   name: string,
@@ -339,37 +377,89 @@ export async function createTournamentState(
       .insert({ code, name, organizer_id: organizerId, status, state })
       .select('*')
       .single();
-    return { row: (data as TournamentStateRow) ?? null, error: error ? extractMessage(error) : null };
+
+    if (error) {
+      const msg = extractMessage(error);
+      if (isMissingTournamentTables(msg)) {
+        const row: TournamentStateRow = {
+          id: fallbackId('tournament'),
+          code,
+          name,
+          organizer_id: organizerId,
+          status,
+          state,
+          created_at: nowIso(),
+          updated_at: nowIso(),
+        };
+        const rows = readFallbackRows<TournamentStateRow>(TOURNAMENT_STATE_FALLBACK_KEY);
+        rows.push(row);
+        writeFallbackRows(TOURNAMENT_STATE_FALLBACK_KEY, rows);
+        return { row, error: null };
+      }
+      return { row: null, error: msg };
+    }
+
+    return { row: (data as TournamentStateRow) ?? null, error: null };
   } catch (e: any) {
-    return { row: null, error: extractMessage(e) };
+    const msg = extractMessage(e);
+    if (isMissingTournamentTables(msg)) {
+      const row: TournamentStateRow = {
+        id: fallbackId('tournament'),
+        code,
+        name,
+        organizer_id: organizerId,
+        status,
+        state,
+        created_at: nowIso(),
+        updated_at: nowIso(),
+      };
+      const rows = readFallbackRows<TournamentStateRow>(TOURNAMENT_STATE_FALLBACK_KEY);
+      rows.push(row);
+      writeFallbackRows(TOURNAMENT_STATE_FALLBACK_KEY, rows);
+      return { row, error: null };
+    }
+    return { row: null, error: msg };
   }
 }
 
 export async function getTournamentStateById(id: string): Promise<TournamentStateRow | null> {
-  const { data } = await supabase
+  const { data, error } = await supabase
     .from('tournament_states')
     .select('*')
     .eq('id', id)
     .maybeSingle();
+  if (error && isMissingTournamentTables(extractMessage(error))) {
+    const rows = readFallbackRows<TournamentStateRow>(TOURNAMENT_STATE_FALLBACK_KEY);
+    return rows.find(r => r.id === id) ?? null;
+  }
   return (data as TournamentStateRow) ?? null;
 }
 
 export async function getTournamentStateByCode(code: string): Promise<TournamentStateRow | null> {
-  const { data } = await supabase
+  const { data, error } = await supabase
     .from('tournament_states')
     .select('*')
     .eq('code', code)
     .maybeSingle();
+  if (error && isMissingTournamentTables(extractMessage(error))) {
+    const rows = readFallbackRows<TournamentStateRow>(TOURNAMENT_STATE_FALLBACK_KEY);
+    return rows.find(r => r.code === code) ?? null;
+  }
   return (data as TournamentStateRow) ?? null;
 }
 
 export async function listOpenTournamentStates(): Promise<TournamentStateRow[]> {
-  const { data } = await supabase
+  const { data, error } = await supabase
     .from('tournament_states')
     .select('*')
     .in('status', ['waiting', 'in-progress', 'interval'])
     .order('updated_at', { ascending: false })
     .limit(100);
+  if (error && isMissingTournamentTables(extractMessage(error))) {
+    return readFallbackRows<TournamentStateRow>(TOURNAMENT_STATE_FALLBACK_KEY)
+      .filter(r => ['waiting', 'in-progress', 'interval'].includes(r.status))
+      .sort((a, b) => (b.updated_at || '').localeCompare(a.updated_at || ''));
+  }
   return ((data as TournamentStateRow[]) ?? []);
 }
 
@@ -385,9 +475,42 @@ export async function updateTournamentState(
       .from('tournament_states')
       .update(payload)
       .eq('id', id);
-    return error ? extractMessage(error) : null;
+    if (error) {
+      const msg = extractMessage(error);
+      if (isMissingTournamentTables(msg)) {
+        const rows = readFallbackRows<TournamentStateRow>(TOURNAMENT_STATE_FALLBACK_KEY);
+        const idx = rows.findIndex(r => r.id === id);
+        if (idx >= 0) {
+          rows[idx] = {
+            ...rows[idx],
+            state,
+            status: status ?? rows[idx].status,
+            updated_at: nowIso(),
+          };
+          writeFallbackRows(TOURNAMENT_STATE_FALLBACK_KEY, rows);
+          return null;
+        }
+      }
+      return msg;
+    }
+    return null;
   } catch (e: any) {
-    return extractMessage(e);
+    const msg = extractMessage(e);
+    if (isMissingTournamentTables(msg)) {
+      const rows = readFallbackRows<TournamentStateRow>(TOURNAMENT_STATE_FALLBACK_KEY);
+      const idx = rows.findIndex(r => r.id === id);
+      if (idx >= 0) {
+        rows[idx] = {
+          ...rows[idx],
+          state,
+          status: status ?? rows[idx].status,
+          updated_at: nowIso(),
+        };
+        writeFallbackRows(TOURNAMENT_STATE_FALLBACK_KEY, rows);
+        return null;
+      }
+    }
+    return msg;
   }
 }
 
@@ -397,9 +520,32 @@ export async function deleteTournamentState(id: string): Promise<AuthError> {
       .from('tournament_states')
       .delete()
       .eq('id', id);
-    return error ? extractMessage(error) : null;
+    if (error) {
+      const msg = extractMessage(error);
+      if (isMissingTournamentTables(msg)) {
+        const rows = readFallbackRows<TournamentStateRow>(TOURNAMENT_STATE_FALLBACK_KEY)
+          .filter(r => r.id !== id);
+        writeFallbackRows(TOURNAMENT_STATE_FALLBACK_KEY, rows);
+        const invites = readFallbackRows<TournamentInviteRow>(TOURNAMENT_INVITE_FALLBACK_KEY)
+          .filter(i => i.tournament_id !== id);
+        writeFallbackRows(TOURNAMENT_INVITE_FALLBACK_KEY, invites);
+        return null;
+      }
+      return msg;
+    }
+    return null;
   } catch (e: any) {
-    return extractMessage(e);
+    const msg = extractMessage(e);
+    if (isMissingTournamentTables(msg)) {
+      const rows = readFallbackRows<TournamentStateRow>(TOURNAMENT_STATE_FALLBACK_KEY)
+        .filter(r => r.id !== id);
+      writeFallbackRows(TOURNAMENT_STATE_FALLBACK_KEY, rows);
+      const invites = readFallbackRows<TournamentInviteRow>(TOURNAMENT_INVITE_FALLBACK_KEY)
+        .filter(i => i.tournament_id !== id);
+      writeFallbackRows(TOURNAMENT_INVITE_FALLBACK_KEY, invites);
+      return null;
+    }
+    return msg;
   }
 }
 
@@ -421,29 +567,76 @@ export async function createTournamentInvite(
         },
         { onConflict: 'tournament_id,invited_user_id' }
       );
-    return error ? extractMessage(error) : null;
+    if (error) {
+      const msg = extractMessage(error);
+      if (isMissingTournamentTables(msg)) {
+        const invites = readFallbackRows<TournamentInviteRow>(TOURNAMENT_INVITE_FALLBACK_KEY);
+        const idx = invites.findIndex(i => i.tournament_id === tournamentId && i.invited_user_id === invitedUserId);
+        const row: TournamentInviteRow = {
+          id: idx >= 0 ? invites[idx].id : fallbackId('invite'),
+          tournament_id: tournamentId,
+          organizer_id: organizerId,
+          invited_user_id: invitedUserId,
+          status: 'pending',
+          created_at: idx >= 0 ? invites[idx].created_at : nowIso(),
+          responded_at: null,
+        };
+        if (idx >= 0) invites[idx] = row; else invites.push(row);
+        writeFallbackRows(TOURNAMENT_INVITE_FALLBACK_KEY, invites);
+        return null;
+      }
+      return msg;
+    }
+    return null;
   } catch (e: any) {
-    return extractMessage(e);
+    const msg = extractMessage(e);
+    if (isMissingTournamentTables(msg)) {
+      const invites = readFallbackRows<TournamentInviteRow>(TOURNAMENT_INVITE_FALLBACK_KEY);
+      const idx = invites.findIndex(i => i.tournament_id === tournamentId && i.invited_user_id === invitedUserId);
+      const row: TournamentInviteRow = {
+        id: idx >= 0 ? invites[idx].id : fallbackId('invite'),
+        tournament_id: tournamentId,
+        organizer_id: organizerId,
+        invited_user_id: invitedUserId,
+        status: 'pending',
+        created_at: idx >= 0 ? invites[idx].created_at : nowIso(),
+        responded_at: null,
+      };
+      if (idx >= 0) invites[idx] = row; else invites.push(row);
+      writeFallbackRows(TOURNAMENT_INVITE_FALLBACK_KEY, invites);
+      return null;
+    }
+    return msg;
   }
 }
 
 export async function listTournamentInvitesForUser(userId: string): Promise<TournamentInviteRow[]> {
-  const { data } = await supabase
+  const { data, error } = await supabase
     .from('tournament_invites')
     .select('*')
     .eq('invited_user_id', userId)
     .eq('status', 'pending')
     .order('created_at', { ascending: false });
+  if (error && isMissingTournamentTables(extractMessage(error))) {
+    return readFallbackRows<TournamentInviteRow>(TOURNAMENT_INVITE_FALLBACK_KEY)
+      .filter(i => i.invited_user_id === userId && i.status === 'pending')
+      .sort((a, b) => (b.created_at || '').localeCompare(a.created_at || ''));
+  }
   return ((data as TournamentInviteRow[]) ?? []);
 }
 
 export async function listTournamentInvitesForOrganizer(tournamentId: string): Promise<TournamentInviteRow[]> {
-  const { data } = await supabase
+  const { data, error } = await supabase
     .from('tournament_invites')
     .select('*')
     .eq('tournament_id', tournamentId)
     .eq('status', 'pending')
     .order('created_at', { ascending: false });
+  if (error && isMissingTournamentTables(extractMessage(error))) {
+    return readFallbackRows<TournamentInviteRow>(TOURNAMENT_INVITE_FALLBACK_KEY)
+      .filter(i => i.tournament_id === tournamentId && i.status === 'pending')
+      .sort((a, b) => (b.created_at || '').localeCompare(a.created_at || ''));
+  }
   return ((data as TournamentInviteRow[]) ?? []);
 }
 
@@ -456,8 +649,31 @@ export async function respondTournamentInvite(
       .from('tournament_invites')
       .update({ status, responded_at: new Date().toISOString() })
       .eq('id', inviteId);
-    return error ? extractMessage(error) : null;
+    if (error) {
+      const msg = extractMessage(error);
+      if (isMissingTournamentTables(msg)) {
+        const invites = readFallbackRows<TournamentInviteRow>(TOURNAMENT_INVITE_FALLBACK_KEY);
+        const idx = invites.findIndex(i => i.id === inviteId);
+        if (idx >= 0) {
+          invites[idx] = { ...invites[idx], status, responded_at: nowIso() };
+          writeFallbackRows(TOURNAMENT_INVITE_FALLBACK_KEY, invites);
+          return null;
+        }
+      }
+      return msg;
+    }
+    return null;
   } catch (e: any) {
-    return extractMessage(e);
+    const msg = extractMessage(e);
+    if (isMissingTournamentTables(msg)) {
+      const invites = readFallbackRows<TournamentInviteRow>(TOURNAMENT_INVITE_FALLBACK_KEY);
+      const idx = invites.findIndex(i => i.id === inviteId);
+      if (idx >= 0) {
+        invites[idx] = { ...invites[idx], status, responded_at: nowIso() };
+        writeFallbackRows(TOURNAMENT_INVITE_FALLBACK_KEY, invites);
+        return null;
+      }
+    }
+    return msg;
   }
 }

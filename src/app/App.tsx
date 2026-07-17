@@ -90,6 +90,8 @@ const i18n = {
     // Game
     go: 'VAI!', timeLeft: 'Tempo', score: 'Pontos', bibleHelp: 'Bíblia',
     correctBanner: '✓ CORRETO!', wrongBanner: '✗ ERRADO', timeUp: 'Tempo esgotado!',
+    penaltyWrong: 'Penalidade: -3s', penaltyGuessing: 'Modo chute ativo: -5s por erro',
+    guessingModeBadge: 'MODO CHUTE',
     yourScore: 'Sua Pontuação', answered: 'Respondidas', accuracy: 'Acertos',
     playAgain: 'Jogar Novamente', backHome: 'Início',
     bibleVerse: 'Versículo', closeBible: 'Fechar',
@@ -141,6 +143,8 @@ const i18n = {
     errorSending: 'Error sending', cannotAddSelf: "You can't add yourself",
     go: 'GO!', timeLeft: 'Time', score: 'Score', bibleHelp: 'Bible',
     correctBanner: '✓ CORRECT!', wrongBanner: '✗ WRONG', timeUp: "Time's up!",
+    penaltyWrong: 'Penalty: -3s', penaltyGuessing: 'Guessing mode active: -5s per mistake',
+    guessingModeBadge: 'GUESSING MODE',
     yourScore: 'Your Score', answered: 'Answered', accuracy: 'Accuracy',
     playAgain: 'Play Again', backHome: 'Home',
     bibleVerse: 'Verse', closeBible: 'Close',
@@ -192,6 +196,8 @@ const i18n = {
     errorSending: 'Error al enviar', cannotAddSelf: 'No puedes agregarte a ti mismo',
     go: '¡VAMOS!', timeLeft: 'Tiempo', score: 'Puntos', bibleHelp: 'Biblia',
     correctBanner: '✓ ¡CORRECTO!', wrongBanner: '✗ INCORRECTO', timeUp: '¡Tiempo agotado!',
+    penaltyWrong: 'Penalización: -3s', penaltyGuessing: 'Modo guessing activo: -5s por error',
+    guessingModeBadge: 'MODO GUESSING',
     yourScore: 'Tu Puntuación', answered: 'Respondidas', accuracy: 'Aciertos',
     playAgain: 'Jugar de Nuevo', backHome: 'Inicio',
     bibleVerse: 'Versículo', closeBible: 'Cerrar',
@@ -1088,6 +1094,9 @@ function GameScreen({ lang, onFinish, onAbandon }: { lang: Lang; onFinish: (s: n
   const pool = useRef<number[]>(buildPool());
   const qi = useRef(0);
   const seenThisGame = useRef<number[]>([]);
+  const lastAnswerAtRef = useRef<number | null>(null);
+  const lastAnswerOptionRef = useRef<number | null>(null);
+  const fastSameOptionStreakRef = useRef(0);
   const [timeLeft, setTimeLeft] = useState(ROUND_SECONDS);
   const [score, setScore] = useState(0);
   const [correct, setCorrect] = useState(0);
@@ -1099,6 +1108,7 @@ function GameScreen({ lang, onFinish, onAbandon }: { lang: Lang; onFinish: (s: n
   const [helpsLeft, setHelpsLeft] = useState(MAX_BIBLE_HELPS);
   const [showBible, setShowBible] = useState(false);
   const [done, setDone] = useState(false);
+  const [guessingMode, setGuessingMode] = useState(false);
   const [confirmAbandon, setConfirmAbandon] = useState(false);
   const finishRef = useRef(onFinish);
   finishRef.current = onFinish;
@@ -1130,11 +1140,34 @@ function GameScreen({ lang, onFinish, onAbandon }: { lang: Lang; onFinish: (s: n
 
   const answer = (idx: number) => {
     if (selected !== null || done) return;
+
+    const now = Date.now();
+    const prevAt = lastAnswerAtRef.current;
+    const prevOpt = lastAnswerOptionRef.current;
+    const isFast = prevAt !== null && now - prevAt <= 1000;
+    if (isFast && prevOpt === idx) {
+      fastSameOptionStreakRef.current += 1;
+    } else {
+      fastSameOptionStreakRef.current = 1;
+    }
+    lastAnswerAtRef.current = now;
+    lastAnswerOptionRef.current = idx;
+
+    if (!guessingMode && fastSameOptionStreakRef.current > 5) {
+      setGuessingMode(true);
+    }
+
     setSelected(idx);
     const ok = idx === cur.correctAnswer;
     setFeedback(ok ? 'correct' : 'wrong');
     setTotal(p => p + 1);
-    if (ok) { setScore(p => p + (POINTS[cur.difficulty] ?? 100)); setCorrect(p => p + 1); }
+    if (ok) {
+      setScore(p => p + (POINTS[cur.difficulty] ?? 100));
+      setCorrect(p => p + 1);
+    } else {
+      const penalty = guessingMode || fastSameOptionStreakRef.current > 5 ? 5 : 3;
+      setTimeLeft(p => Math.max(0, p - penalty));
+    }
     setTimeout(nextQ, 900);
   };
 
@@ -1169,10 +1202,19 @@ function GameScreen({ lang, onFinish, onAbandon }: { lang: Lang; onFinish: (s: n
           </button>
         )}
         <div className="flex-1">
+          {guessingMode && (
+            <div className="mb-1 inline-flex items-center gap-1 rounded-full border border-red-400/50 bg-red-500/25 px-2.5 py-0.5 animate-pulse">
+              <span className="text-[10px]">⚠️</span>
+              <span className="text-[10px] font-black uppercase tracking-widest text-red-200">{tx.guessingModeBadge}</span>
+            </div>
+          )}
           <div className="flex justify-between text-xs text-white/60 mb-1">
             <span>{tx.timeLeft}</span>
             <span className={`font-black ${timeLeft <= 10 ? 'text-red-400' : 'text-white'}`}>{timeLeft}s</span>
           </div>
+            <div className="flex justify-between text-[11px] text-white/50 mb-1">
+              <span>{guessingMode ? tx.penaltyGuessing : tx.penaltyWrong}</span>
+            </div>
           <div className="h-2.5 bg-white/10 rounded-full overflow-hidden">
             <div className={`h-full rounded-full transition-all duration-1000 ${timerCls}`} style={{ width: `${pct}%` }} />
           </div>

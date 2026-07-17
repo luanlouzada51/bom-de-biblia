@@ -422,7 +422,7 @@ export default function CopaCristaoPage({ profile, onClose }: { profile: Profile
 
   const startTournament = async () => {
     if (!tournament) return;
-    if (tournament.players.length < 16) return setMsg('M�nimo de 16 jogadores');
+    if (tournament.players.length < 4) return setMsg('M�nimo de 4 jogadores');
     if (tournament.players.length !== tournament.size) return setMsg(`Precisa completar ${tournament.size} jogadores`);
 
     const seeded = shuffle(tournament.players.map(p => p.id));
@@ -557,7 +557,7 @@ export default function CopaCristaoPage({ profile, onClose }: { profile: Profile
         {view === 'organize' && (
           <div className="space-y-4">
             <div className="grid grid-cols-3 gap-3">
-              {[16, 32, 64].map(n => (
+              {[4, 8, 16, 32].map(n => (
                 <button key={n} onClick={() => setSize(n)} className={`rounded-xl p-3 font-bold ${size === n ? 'bg-blue-500 text-white' : 'bg-white/10 text-white/70'}`}>{n} jogadores</button>
               ))}
             </div>

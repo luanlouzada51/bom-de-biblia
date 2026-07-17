@@ -327,7 +327,7 @@ export default function CopaCristaoPage({ profile, onClose }: { profile: Profile
   const createTournament = async () => {
     const initial: Omit<TournamentState, 'id'> = {
       code: code6(),
-      name: 'Copa Crist�o',
+      name: 'Copa Cristão',
       organizerId: profile.id,
       organizerName: profile.username,
       size,
@@ -369,15 +369,15 @@ export default function CopaCristaoPage({ profile, onClose }: { profile: Profile
     const created = fromRow(result.row);
     setTournament(created);
     setView('room');
-    setMsg('Copa Crist�o criada.');
+    setMsg('Copa Cristão criada.');
     refreshGlobal();
   };
 
   const joinByCode = async () => {
     const row = await getTournamentStateByCode(joinCode.trim());
-    if (!row) return setMsg('Torneio n�o encontrado');
+    if (!row) return setMsg('Torneio não encontrado');
     const state = fromRow(row);
-    if (state.status !== 'waiting') return setMsg('Esse torneio j� iniciou');
+    if (state.status !== 'waiting') return setMsg('Esse torneio já iniciou');
     if (!state.players.some(p => p.id === profile.id)) {
       if (state.players.length >= state.size) return setMsg('Torneio cheio');
       state.players = [...state.players, toPlayer(profile)];
@@ -390,9 +390,9 @@ export default function CopaCristaoPage({ profile, onClose }: { profile: Profile
 
   const inviteFriend = async (friendId: string) => {
     if (!tournament) return;
-    if (tournament.players.some(p => p.id === friendId)) return setMsg('Esse amigo j� entrou');
+    if (tournament.players.some(p => p.id === friendId)) return setMsg('Esse amigo já entrou');
     if (organizerInvites.some(inv => inv.invited_user_id === friendId && inv.status === 'pending')) {
-      return setMsg('Esse amigo j� foi convidado');
+      return setMsg('Esse amigo já foi convidado');
     }
     const err = await createTournamentInvite(tournament.id, profile.id, friendId);
     if (err) setMsg(err); else setMsg('Convite enviado');
@@ -401,9 +401,9 @@ export default function CopaCristaoPage({ profile, onClose }: { profile: Profile
 
   const acceptInvite = async (invite: TournamentInviteRow) => {
     const row = await getTournamentStateById(invite.tournament_id);
-    if (!row) return setMsg('Torneio indispon�vel');
+    if (!row) return setMsg('Torneio indisponível');
     const state = fromRow(row);
-    if (state.status !== 'waiting') return setMsg('Torneio j� iniciado');
+    if (state.status !== 'waiting') return setMsg('Torneio já iniciado');
     if (!state.players.some(p => p.id === profile.id)) {
       if (state.players.length >= state.size) return setMsg('Torneio cheio');
       state.players = [...state.players, toPlayer(profile)];
@@ -422,7 +422,7 @@ export default function CopaCristaoPage({ profile, onClose }: { profile: Profile
 
   const startTournament = async () => {
     if (!tournament) return;
-    if (tournament.players.length < 4) return setMsg('M�nimo de 4 jogadores');
+    if (tournament.players.length < 4) return setMsg('Mínimo de 4 jogadores');
     if (tournament.players.length !== tournament.size) return setMsg(`Precisa completar ${tournament.size} jogadores`);
 
     const seeded = shuffle(tournament.players.map(p => p.id));
@@ -533,7 +533,7 @@ export default function CopaCristaoPage({ profile, onClose }: { profile: Profile
         <div className="mb-5 flex items-center justify-between">
           <div>
             <p className="text-xs uppercase tracking-[0.3em] text-blue-300 font-bold">Modo torneio</p>
-            <h2 className="text-3xl font-black text-white">Copa Crist�o</h2>
+            <h2 className="text-3xl font-black text-white">Copa Cristão</h2>
           </div>
           <button onClick={onClose} className="rounded-xl bg-white/10 px-4 py-2 text-sm text-white">Fechar</button>
         </div>
@@ -563,10 +563,10 @@ export default function CopaCristaoPage({ profile, onClose }: { profile: Profile
             </div>
             <label className="flex items-center gap-2 text-white">
               <input type="checkbox" checked={thirdPlaceEnabled} onChange={e => setThirdPlaceEnabled(e.target.checked)} />
-              Disputa de 3� lugar
+              Disputa de 3º lugar
             </label>
             <div className="flex gap-2">
-              <button onClick={createTournament} className="rounded-xl bg-emerald-500 px-4 py-3 text-white font-black">Criar Copa Crist�o</button>
+              <button onClick={createTournament} className="rounded-xl bg-emerald-500 px-4 py-3 text-white font-black">Criar Copa Cristão</button>
               <button onClick={() => setView('menu')} className="rounded-xl bg-white/10 px-4 py-3 text-white">Voltar</button>
             </div>
           </div>
@@ -595,7 +595,7 @@ export default function CopaCristaoPage({ profile, onClose }: { profile: Profile
             </div>
 
             <div className="rounded-2xl bg-white/5 border border-white/10 p-4">
-              <p className="text-white font-black">Entrar por c�digo</p>
+              <p className="text-white font-black">Entrar por código</p>
               <input value={joinCode} onChange={e => setJoinCode(e.target.value.replace(/\D/g, '').slice(0, 6))} className="w-full mt-3 rounded-xl bg-slate-950/40 border border-white/10 p-3 text-center text-white text-2xl tracking-[0.3em] font-black" placeholder="000000" />
               <button onClick={joinByCode} className="mt-3 w-full rounded-xl bg-blue-500 py-3 text-white font-black">Entrar</button>
 
@@ -632,11 +632,11 @@ export default function CopaCristaoPage({ profile, onClose }: { profile: Profile
           <div className="space-y-6">
             <div className="rounded-2xl bg-white/5 border border-white/10 p-4 flex flex-wrap gap-3 items-center justify-between">
               <div>
-                <p className="text-white font-black text-xl">{tournament.name} � {tournament.code}</p>
+                <p className="text-white font-black text-xl">{tournament.name} - {tournament.code}</p>
                 <p className="text-white/50 text-sm">{tournament.players.length}/{tournament.size} jogadores</p>
               </div>
               <div className="flex gap-2">
-                <button onClick={() => navigator.clipboard.writeText(tournament.code)} className="rounded-xl bg-white/10 px-3 py-2 text-white text-sm">Copiar c�digo</button>
+                <button onClick={() => navigator.clipboard.writeText(tournament.code)} className="rounded-xl bg-white/10 px-3 py-2 text-white text-sm">Copiar código</button>
                 <button onClick={leaveTournament} className="rounded-xl bg-red-500 px-3 py-2 text-white text-sm font-bold">{isOrganizer && tournament.status === 'waiting' ? 'Cancelar' : 'Sair'}</button>
               </div>
             </div>
@@ -693,7 +693,7 @@ export default function CopaCristaoPage({ profile, onClose }: { profile: Profile
                 <div className="rounded-2xl bg-white/5 border border-white/10 p-4">
                   <div className="flex items-center justify-between mb-3">
                     <p className="text-white font-black text-lg">Rodada {tournament.currentRound}</p>
-                    {tournament.status === 'interval' ? <p className="text-amber-300 font-bold">Pr�xima em {remainingText((tournament.intervalEndsAt || 0) - now)}</p> : <p className="text-blue-300 font-bold">{tournament.status === 'finished' ? 'Finalizado' : 'Ao vivo'}</p>}
+                    {tournament.status === 'interval' ? <p className="text-amber-300 font-bold">Próxima em {remainingText((tournament.intervalEndsAt || 0) - now)}</p> : <p className="text-blue-300 font-bold">{tournament.status === 'finished' ? 'Finalizado' : 'Ao vivo'}</p>}
                   </div>
                   <div className="space-y-3">
                     {currentMatches.map(match => {
@@ -703,9 +703,9 @@ export default function CopaCristaoPage({ profile, onClose }: { profile: Profile
                       let sb = match.scoreB ?? 0;
                       return (
                         <div key={match.id} className="rounded-xl border border-white/10 bg-slate-950/40 p-3">
-                          <p className="text-white/50 text-xs uppercase">{match.label} � {match.bracket === 'main' ? 'Principal' : '3� lugar'}</p>
+                          <p className="text-white/50 text-xs uppercase">{match.label} - {match.bracket === 'main' ? 'Principal' : '3º lugar'}</p>
                           <div className="mt-2 grid grid-cols-[1fr,auto] gap-2 items-center">
-                            <p className="text-white text-sm">{pa ? `${pa.avatar} ${pa.name}` : '�'} x {pb ? `${pb.avatar} ${pb.name}` : '�'}</p>
+                            <p className="text-white text-sm">{pa ? `${pa.avatar} ${pa.name}` : '-'} x {pb ? `${pb.avatar} ${pb.name}` : '-'}</p>
                             {isOrganizer && tournament.status === 'in-progress' && match.status !== 'finished' && match.status !== 'walkover' && pa && pb ? (
                               <div className="flex gap-1 items-center">
                                 <input type="number" min={0} defaultValue={sa} onChange={e => { sa = Math.max(0, Number(e.target.value) || 0); }} className="w-14 rounded bg-white/10 text-white text-sm p-1" />
@@ -721,7 +721,7 @@ export default function CopaCristaoPage({ profile, onClose }: { profile: Profile
                                 }} className="rounded bg-emerald-500 px-2 py-1 text-xs text-white font-bold">Finalizar</button>
                               </div>
                             ) : (
-                              <p className="text-white font-bold">{match.scoreA ?? '�'} x {match.scoreB ?? '�'}</p>
+                              <p className="text-white font-bold">{match.scoreA ?? '-'} x {match.scoreB ?? '-'}</p>
                             )}
                           </div>
                           {match.winnerId && <p className="mt-1 text-emerald-300 text-xs">Vencedor: {playerById(tournament, match.winnerId)?.name}</p>}
@@ -732,17 +732,17 @@ export default function CopaCristaoPage({ profile, onClose }: { profile: Profile
 
                   {tournament.status === 'finished' && (
                     <div className="mt-4 rounded-xl bg-white/10 p-3">
-                      <p className="text-white font-black">P�dio</p>
-                      <p className="text-white text-sm mt-1">1�: {playerById(tournament, tournament.championId)?.name || '�'}</p>
-                      <p className="text-white text-sm">2�: {playerById(tournament, tournament.runnerUpId)?.name || '�'}</p>
-                      <p className="text-white text-sm">3�: {tournament.thirdPlaceEnabled ? (playerById(tournament, tournament.thirdPlaceId)?.name || '�') : 'N�o habilitado'}</p>
-                      {tournament.thirdPlaceEnabled && <p className="text-white text-sm">4�: {playerById(tournament, tournament.fourthPlaceId)?.name || '�'}</p>}
+                      <p className="text-white font-black">Pódio</p>
+                      <p className="text-white text-sm mt-1">1º: {playerById(tournament, tournament.championId)?.name || '-'}</p>
+                      <p className="text-white text-sm">2º: {playerById(tournament, tournament.runnerUpId)?.name || '-'}</p>
+                      <p className="text-white text-sm">3º: {tournament.thirdPlaceEnabled ? (playerById(tournament, tournament.thirdPlaceId)?.name || '-') : 'Não habilitado'}</p>
+                      {tournament.thirdPlaceEnabled && <p className="text-white text-sm">4º: {playerById(tournament, tournament.fourthPlaceId)?.name || '-'}</p>}
                     </div>
                   )}
                 </div>
 
                 <div className="rounded-2xl bg-white/5 border border-white/10 p-4">
-                  <p className="text-white font-black mb-3">Pontua��o dos membros</p>
+                  <p className="text-white font-black mb-3">Pontuação dos membros</p>
                   <div className="space-y-2">
                     {ranking.map((p, i) => (
                       <div key={p.id} className="rounded-xl border border-white/10 bg-slate-950/40 p-2 flex items-center justify-between">

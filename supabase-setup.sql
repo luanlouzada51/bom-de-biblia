@@ -68,12 +68,56 @@ CREATE TABLE IF NOT EXISTS reports (
 CREATE INDEX IF NOT EXISTS idx_reports_reported_user_id ON reports(reported_user_id);
 CREATE INDEX IF NOT EXISTS idx_reports_status ON reports(status);
 
+-- 5. Copa Cristão (estado do torneio em JSON + convites)
+CREATE TABLE IF NOT EXISTS tournament_states (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  code CHAR(6) UNIQUE NOT NULL,
+  name TEXT NOT NULL DEFAULT 'Copa Cristão',
+  organizer_id UUID NOT NULL REFERENCES profiles(id) ON DELETE CASCADE,
+  status TEXT NOT NULL DEFAULT 'waiting' CHECK (status IN ('waiting','in-progress','interval','finished','cancelled')),
+  state JSONB NOT NULL DEFAULT '{}'::jsonb,
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS tournament_invites (
+  id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
+  tournament_id UUID NOT NULL REFERENCES tournament_states(id) ON DELETE CASCADE,
+  organizer_id UUID NOT NULL REFERENCES profiles(id) ON DELETE CASCADE,
+  invited_user_id UUID NOT NULL REFERENCES profiles(id) ON DELETE CASCADE,
+  status TEXT NOT NULL DEFAULT 'pending' CHECK (status IN ('pending','accepted','declined')),
+  created_at TIMESTAMPTZ DEFAULT NOW(),
+  responded_at TIMESTAMPTZ,
+  UNIQUE(tournament_id, invited_user_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_tournament_states_status ON tournament_states(status);
+CREATE INDEX IF NOT EXISTS idx_tournament_states_organizer ON tournament_states(organizer_id);
+CREATE INDEX IF NOT EXISTS idx_tournament_states_updated_at ON tournament_states(updated_at DESC);
+CREATE INDEX IF NOT EXISTS idx_tournament_invites_invited ON tournament_invites(invited_user_id, status);
+CREATE INDEX IF NOT EXISTS idx_tournament_invites_tournament ON tournament_invites(tournament_id);
+
+CREATE OR REPLACE FUNCTION set_updated_at_timestamp()
+RETURNS TRIGGER AS $$
+BEGIN
+  NEW.updated_at = NOW();
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
+DROP TRIGGER IF EXISTS trg_tournament_states_updated_at ON tournament_states;
+CREATE TRIGGER trg_tournament_states_updated_at
+BEFORE UPDATE ON tournament_states
+FOR EACH ROW EXECUTE FUNCTION set_updated_at_timestamp();
+
 -- ── RLS ──────────────────────────────────────────────────────────────────────
 ALTER TABLE profiles ENABLE ROW LEVEL SECURITY;
 ALTER TABLE scores ENABLE ROW LEVEL SECURITY;
 ALTER TABLE friend_requests ENABLE ROW LEVEL SECURITY;
 ALTER TABLE friendships ENABLE ROW LEVEL SECURITY;
 ALTER TABLE reports ENABLE ROW LEVEL SECURITY;
+ALTER TABLE tournament_states ENABLE ROW LEVEL SECURITY;
+ALTER TABLE tournament_invites ENABLE ROW LEVEL SECURITY;
 
 -- Profiles
 DROP POLICY IF EXISTS profiles_select ON profiles;
@@ -118,6 +162,35 @@ CREATE POLICY reports_select ON reports FOR SELECT TO authenticated
 CREATE POLICY reports_insert ON reports FOR INSERT TO authenticated
   WITH CHECK (auth.uid() = reporter_id);
 
+-- Tournament states
+DROP POLICY IF EXISTS tournament_states_select ON tournament_states;
+DROP POLICY IF EXISTS tournament_states_insert ON tournament_states;
+DROP POLICY IF EXISTS tournament_states_update ON tournament_states;
+DROP POLICY IF EXISTS tournament_states_delete ON tournament_states;
+CREATE POLICY tournament_states_select ON tournament_states FOR SELECT TO authenticated USING (true);
+CREATE POLICY tournament_states_insert ON tournament_states FOR INSERT TO authenticated
+  WITH CHECK (auth.uid() = organizer_id);
+CREATE POLICY tournament_states_update ON tournament_states FOR UPDATE TO authenticated
+  USING (true)
+  WITH CHECK (true);
+CREATE POLICY tournament_states_delete ON tournament_states FOR DELETE TO authenticated
+  USING (auth.uid() = organizer_id);
+
+-- Tournament invites
+DROP POLICY IF EXISTS tournament_invites_select ON tournament_invites;
+DROP POLICY IF EXISTS tournament_invites_insert ON tournament_invites;
+DROP POLICY IF EXISTS tournament_invites_update ON tournament_invites;
+DROP POLICY IF EXISTS tournament_invites_delete ON tournament_invites;
+CREATE POLICY tournament_invites_select ON tournament_invites FOR SELECT TO authenticated
+  USING (auth.uid() = organizer_id OR auth.uid() = invited_user_id);
+CREATE POLICY tournament_invites_insert ON tournament_invites FOR INSERT TO authenticated
+  WITH CHECK (auth.uid() = organizer_id);
+CREATE POLICY tournament_invites_update ON tournament_invites FOR UPDATE TO authenticated
+  USING (auth.uid() = organizer_id OR auth.uid() = invited_user_id)
+  WITH CHECK (auth.uid() = organizer_id OR auth.uid() = invited_user_id);
+CREATE POLICY tournament_invites_delete ON tournament_invites FOR DELETE TO authenticated
+  USING (auth.uid() = organizer_id);
+
 -- ── Gerador de código de crente ───────────────────────────────────────────────
 CREATE OR REPLACE FUNCTION generate_friend_code()
 RETURNS CHAR(6) AS $$
@@ -146,5 +219,5 @@ CREATE INDEX IF NOT EXISTS idx_freq_to_user     ON friend_requests(to_user_id, s
 SELECT 'Setup concluído!' AS status;
 SELECT table_name FROM information_schema.tables
 WHERE table_schema = 'public'
-  AND table_name IN ('profiles','scores','friend_requests','friendships')
+  AND table_name IN ('profiles','scores','friend_requests','friendships','tournament_states','tournament_invites')
 ORDER BY table_name;

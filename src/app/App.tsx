@@ -11,6 +11,7 @@ import {
   getPendingRequests, getSentRequests, respondToRequest,
   getFriendships, removeFriend, reportProfile,
 } from '../utils/supabaseClient';
+import CopaCristaoPage from './tournament/CopaCristaoPage';
 
 // ─── Types ────────────────────────────────────────────────────────────────────
 
@@ -727,6 +728,7 @@ function HomeScreen({ profile, lang, onPlay, onLangChange, onProfileUpdate }: {
 function PlayTab({ t, profile, onPlay, copyCode, copied }: {
   t: typeof i18n.pt; profile: Profile; onPlay: () => void; copyCode: () => void; copied: boolean;
 }) {
+  const [showTournament, setShowTournament] = useState(false);
   const [myBest, setMyBest] = useState<ScoreRow | null>(null);
 
   useEffect(() => {
@@ -763,6 +765,19 @@ function PlayTab({ t, profile, onPlay, copyCode, copied }: {
         </div>
         <p className="text-indigo-400/50 text-xs mt-1">{t.shareCode}</p>
       </div>
+      <div className="mt-4">
+        <div className="bg-white/5 rounded-2xl p-4 border border-white/10 flex items-center justify-between">
+          <div>
+            <p className="text-white/60 text-xs uppercase tracking-widest">Copa Cristão</p>
+            <p className="text-white font-black text-lg">Modo Torneio</p>
+          </div>
+          <div className="flex gap-2">
+            <button onClick={() => setShowTournament(true)} className="bg-blue-500 text-white py-2 px-3 rounded-2xl font-bold">Abrir</button>
+          </div>
+        </div>
+      </div>
+
+      {showTournament && <CopaCristaoPage profile={profile} onClose={() => setShowTournament(false)} />}
     </div>
   );
 }

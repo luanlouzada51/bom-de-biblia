@@ -300,3 +300,164 @@ export async function reportProfile(reporterId: string, reportedUserId: string, 
     return extractMessage(e);
   }
 }
+
+// ─── Copa Cristão (Tournament State Sync) ───────────────────────────────────
+
+export type TournamentStateStatus = 'waiting' | 'in-progress' | 'interval' | 'finished' | 'cancelled';
+
+export type TournamentStateRow = {
+  id: string;
+  code: string;
+  name: string;
+  organizer_id: string;
+  status: TournamentStateStatus;
+  state: Record<string, any>;
+  created_at: string;
+  updated_at: string;
+};
+
+export type TournamentInviteRow = {
+  id: string;
+  tournament_id: string;
+  organizer_id: string;
+  invited_user_id: string;
+  status: 'pending' | 'accepted' | 'declined';
+  created_at: string;
+  responded_at: string | null;
+};
+
+export async function createTournamentState(
+  code: string,
+  name: string,
+  organizerId: string,
+  state: Record<string, any>,
+  status: TournamentStateStatus = 'waiting'
+): Promise<{ row: TournamentStateRow | null; error: AuthError }> {
+  try {
+    const { data, error } = await supabase
+      .from('tournament_states')
+      .insert({ code, name, organizer_id: organizerId, status, state })
+      .select('*')
+      .single();
+    return { row: (data as TournamentStateRow) ?? null, error: error ? extractMessage(error) : null };
+  } catch (e: any) {
+    return { row: null, error: extractMessage(e) };
+  }
+}
+
+export async function getTournamentStateById(id: string): Promise<TournamentStateRow | null> {
+  const { data } = await supabase
+    .from('tournament_states')
+    .select('*')
+    .eq('id', id)
+    .maybeSingle();
+  return (data as TournamentStateRow) ?? null;
+}
+
+export async function getTournamentStateByCode(code: string): Promise<TournamentStateRow | null> {
+  const { data } = await supabase
+    .from('tournament_states')
+    .select('*')
+    .eq('code', code)
+    .maybeSingle();
+  return (data as TournamentStateRow) ?? null;
+}
+
+export async function listOpenTournamentStates(): Promise<TournamentStateRow[]> {
+  const { data } = await supabase
+    .from('tournament_states')
+    .select('*')
+    .in('status', ['waiting', 'in-progress', 'interval'])
+    .order('updated_at', { ascending: false })
+    .limit(100);
+  return ((data as TournamentStateRow[]) ?? []);
+}
+
+export async function updateTournamentState(
+  id: string,
+  state: Record<string, any>,
+  status?: TournamentStateStatus
+): Promise<AuthError> {
+  try {
+    const payload: Record<string, any> = { state };
+    if (status) payload.status = status;
+    const { error } = await supabase
+      .from('tournament_states')
+      .update(payload)
+      .eq('id', id);
+    return error ? extractMessage(error) : null;
+  } catch (e: any) {
+    return extractMessage(e);
+  }
+}
+
+export async function deleteTournamentState(id: string): Promise<AuthError> {
+  try {
+    const { error } = await supabase
+      .from('tournament_states')
+      .delete()
+      .eq('id', id);
+    return error ? extractMessage(error) : null;
+  } catch (e: any) {
+    return extractMessage(e);
+  }
+}
+
+export async function createTournamentInvite(
+  tournamentId: string,
+  organizerId: string,
+  invitedUserId: string
+): Promise<AuthError> {
+  try {
+    const { error } = await supabase
+      .from('tournament_invites')
+      .upsert(
+        {
+          tournament_id: tournamentId,
+          organizer_id: organizerId,
+          invited_user_id: invitedUserId,
+          status: 'pending',
+          responded_at: null,
+        },
+        { onConflict: 'tournament_id,invited_user_id' }
+      );
+    return error ? extractMessage(error) : null;
+  } catch (e: any) {
+    return extractMessage(e);
+  }
+}
+
+export async function listTournamentInvitesForUser(userId: string): Promise<TournamentInviteRow[]> {
+  const { data } = await supabase
+    .from('tournament_invites')
+    .select('*')
+    .eq('invited_user_id', userId)
+    .eq('status', 'pending')
+    .order('created_at', { ascending: false });
+  return ((data as TournamentInviteRow[]) ?? []);
+}
+
+export async function listTournamentInvitesForOrganizer(tournamentId: string): Promise<TournamentInviteRow[]> {
+  const { data } = await supabase
+    .from('tournament_invites')
+    .select('*')
+    .eq('tournament_id', tournamentId)
+    .eq('status', 'pending')
+    .order('created_at', { ascending: false });
+  return ((data as TournamentInviteRow[]) ?? []);
+}
+
+export async function respondTournamentInvite(
+  inviteId: string,
+  status: 'accepted' | 'declined'
+): Promise<AuthError> {
+  try {
+    const { error } = await supabase
+      .from('tournament_invites')
+      .update({ status, responded_at: new Date().toISOString() })
+      .eq('id', inviteId);
+    return error ? extractMessage(error) : null;
+  } catch (e: any) {
+    return extractMessage(e);
+  }
+}

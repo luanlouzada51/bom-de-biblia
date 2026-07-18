@@ -62,6 +62,7 @@ type TournamentState = {
   matches: Match[];
   status: TournamentStateStatus;
   currentRound: number;
+  roundStartedAt: number | null;
   intervalEndsAt: number | null;
   startedAt: number | null;
   finishedAt: number | null;
@@ -74,6 +75,8 @@ type TournamentState = {
 };
 
 const ROUND_QUESTION_COUNT = 10;
+const ROUND_DURATION_SECONDS = 120;
+const ROUND_DURATION_MS = ROUND_DURATION_SECONDS * 1000;
 const POINTS: Record<string, number> = {
   'Fácil': 100,
   'Médio': 200,
@@ -208,6 +211,7 @@ function fromRow(row: TournamentStateRow): TournamentState {
     matches: state.matches || [],
     status: row.status,
     currentRound: state.currentRound || 0,
+    roundStartedAt: state.roundStartedAt ?? null,
     intervalEndsAt: state.intervalEndsAt ?? null,
     startedAt: state.startedAt ?? null,
     finishedAt: state.finishedAt ?? null,
@@ -228,6 +232,7 @@ function toStatePayload(state: TournamentState) {
     players: state.players,
     matches: state.matches,
     currentRound: state.currentRound,
+    roundStartedAt: state.roundStartedAt,
     intervalEndsAt: state.intervalEndsAt,
     startedAt: state.startedAt,
     finishedAt: state.finishedAt,
@@ -275,6 +280,7 @@ function computeNextStateAfterRound(state: TournamentState): TournamentState {
       players,
       status: 'finished',
       finishedAt: Date.now(),
+      roundStartedAt: null,
       intervalEndsAt: null,
       championId: championId ?? null,
       runnerUpId: runnerUpId ?? null,
@@ -297,6 +303,7 @@ function computeNextStateAfterRound(state: TournamentState): TournamentState {
     ...state,
     matches: [...state.matches, ...nextMain, ...nextThird],
     currentRound: nextRound,
+    roundStartedAt: null,
     status: 'interval',
     intervalEndsAt: null,
     roundQuestionOrders,
@@ -319,15 +326,27 @@ export default function CopaCristaoPage({ profile, onClose }: { profile: Profile
   const [quizPos, setQuizPos] = useState(0);
   const [quizScore, setQuizScore] = useState(0);
   const [quizStartAt, setQuizStartAt] = useState<number | null>(null);
+  const [quizDeadlineAt, setQuizDeadlineAt] = useState<number | null>(null);
   const [quizSelected, setQuizSelected] = useState<number | null>(null);
   const [quizFeedback, setQuizFeedback] = useState<'correct' | 'wrong' | null>(null);
+  const [localNow, setLocalNow] = useState(Date.now());
+  const [autoResolvingRound, setAutoResolvingRound] = useState(false);
 
   const isOrganizer = tournament?.organizerId === profile.id;
   const currentMatches = tournament ? activeRoundMatches(tournament) : [];
   const currentRoundQuestionOrder = tournament ? (tournament.roundQuestionOrders[String(tournament.currentRound)] || []) : [];
   const ranking = useMemo(() => (tournament ? [...tournament.players].sort((a, b) => b.totalScore - a.totalScore) : []), [tournament]);
+  const myCurrentMatch = useMemo(() => {
+    if (!tournament) return null;
+    return currentMatches.find(m => (m.playerAId === profile.id || m.playerBId === profile.id) && m.status === 'in-progress') || null;
+  }, [tournament, currentMatches, profile.id]);
+  const visibleMatches = useMemo(() => {
+    if (!tournament) return [] as Match[];
+    return isOrganizer ? currentMatches : currentMatches.filter(m => m.playerAId === profile.id || m.playerBId === profile.id);
+  }, [tournament, isOrganizer, currentMatches, profile.id]);
   const quizQuestionIndex = quizMatchId && quizPos < currentRoundQuestionOrder.length ? currentRoundQuestionOrder[quizPos] : null;
   const quizQuestion = quizQuestionIndex !== null ? questions[quizQuestionIndex] : null;
+  const quizSecondsLeft = quizDeadlineAt ? Math.max(0, Math.ceil((quizDeadlineAt - localNow) / 1000)) : 0;
 
   async function refreshGlobal() {
     const [openRows, myInvites, fr] = await Promise.all([
@@ -362,6 +381,7 @@ export default function CopaCristaoPage({ profile, onClose }: { profile: Profile
     const normalized = { ...next, players: normalizePlayers(next.players, next.size) };
     if (normalized.status === 'interval' && normalized.intervalEndsAt && normalized.intervalEndsAt <= Date.now()) {
       normalized.status = 'in-progress';
+      normalized.roundStartedAt = Date.now();
       normalized.intervalEndsAt = null;
       normalized.matches = normalized.matches.map(m => m.round === normalized.currentRound && m.status === 'scheduled' ? { ...m, status: 'in-progress' as MatchStatus } : m);
     }
@@ -376,7 +396,15 @@ export default function CopaCristaoPage({ profile, onClose }: { profile: Profile
 
   useEffect(() => {
     const timer = window.setInterval(() => {
-      setNow(Date.now());
+      const ts = Date.now();
+      setNow(ts);
+      setLocalNow(ts);
+    }, 1000);
+    return () => window.clearInterval(timer);
+  }, []);
+
+  useEffect(() => {
+    const timer = window.setInterval(() => {
       refreshGlobal();
       refreshCurrent();
     }, 4000);
@@ -401,6 +429,7 @@ export default function CopaCristaoPage({ profile, onClose }: { profile: Profile
       matches: [],
       status: 'waiting',
       currentRound: 0,
+      roundStartedAt: null,
       intervalEndsAt: null,
       startedAt: null,
       finishedAt: null,
@@ -418,6 +447,7 @@ export default function CopaCristaoPage({ profile, onClose }: { profile: Profile
       players: initial.players,
       matches: initial.matches,
       currentRound: initial.currentRound,
+      roundStartedAt: initial.roundStartedAt,
       intervalEndsAt: initial.intervalEndsAt,
       startedAt: initial.startedAt,
       finishedAt: initial.finishedAt,
@@ -504,6 +534,7 @@ export default function CopaCristaoPage({ profile, onClose }: { profile: Profile
       matches: firstRound,
       status: 'in-progress',
       currentRound: 1,
+      roundStartedAt: Date.now(),
       startedAt: Date.now(),
       intervalEndsAt: null,
       players: participants.map(p => ({ ...p, totalScore: 0, status: 'joined', eliminatedAtRound: undefined })),
@@ -540,29 +571,6 @@ export default function CopaCristaoPage({ profile, onClose }: { profile: Profile
     const matches = tournament.matches.map(m => m.id === matchId ? { ...m, scoreA, scoreB, winnerId, loserId, status: 'finished' as MatchStatus } : m);
     const advanced = computeNextStateAfterRound({ ...tournament, players, matches });
     await persist(advanced);
-  };
-
-  const startMatchQuiz = (match: Match) => {
-    if (!tournament || tournament.status !== 'in-progress') return;
-    const isMyMatch = match.playerAId === profile.id || match.playerBId === profile.id;
-    if (!isMyMatch || match.status !== 'in-progress') return;
-    if (!currentRoundQuestionOrder.length) {
-      setMsg('Sequencia de perguntas indisponivel para esta rodada.');
-      return;
-    }
-
-    const alreadySubmitted = match.playerAId === profile.id ? match.scoreA !== null : match.scoreB !== null;
-    if (alreadySubmitted) {
-      setMsg('Sua pontuacao desta partida ja foi enviada.');
-      return;
-    }
-
-    setQuizMatchId(match.id);
-    setQuizPos(0);
-    setQuizScore(0);
-    setQuizStartAt(Date.now());
-    setQuizSelected(null);
-    setQuizFeedback(null);
   };
 
   const submitMatchQuizScore = async (finalScore?: number) => {
@@ -639,6 +647,7 @@ export default function CopaCristaoPage({ profile, onClose }: { profile: Profile
     setQuizPos(0);
     setQuizScore(0);
     setQuizStartAt(null);
+    setQuizDeadlineAt(null);
     setQuizSelected(null);
     setQuizFeedback(null);
 
@@ -647,13 +656,14 @@ export default function CopaCristaoPage({ profile, onClose }: { profile: Profile
   };
 
   const answerQuizQuestion = (optionIndex: number) => {
-    if (!quizQuestion || quizSelected !== null) return;
+    if (!quizQuestion || quizSelected !== null || quizSecondsLeft <= 0) return;
     setQuizSelected(optionIndex);
     const correct = optionIndex === quizQuestion.correctAnswer;
     setQuizFeedback(correct ? 'correct' : 'wrong');
     const earnedPoints = correct ? (POINTS[quizQuestion.difficulty] ?? 100) : 0;
     const nextScore = quizScore + earnedPoints;
     if (correct) setQuizScore(nextScore);
+    if (!correct) setQuizDeadlineAt(prev => (prev ? Math.max(Date.now(), prev - 3000) : prev));
 
     window.setTimeout(async () => {
       const isLast = quizPos >= currentRoundQuestionOrder.length - 1;
@@ -674,11 +684,83 @@ export default function CopaCristaoPage({ profile, onClose }: { profile: Profile
     const next: TournamentState = {
       ...tournament,
       status: 'in-progress',
+      roundStartedAt: Date.now(),
       intervalEndsAt: null,
       matches: tournament.matches.map(m => m.round === tournament.currentRound && m.status === 'scheduled' ? { ...m, status: 'in-progress' as MatchStatus } : m),
     };
     await persist(next);
   };
+
+  useEffect(() => {
+    if (!tournament || tournament.status !== 'in-progress' || !myCurrentMatch || !currentRoundQuestionOrder.length) {
+      return;
+    }
+    const alreadySubmitted = myCurrentMatch.playerAId === profile.id
+      ? myCurrentMatch.scoreA !== null
+      : myCurrentMatch.scoreB !== null;
+    if (alreadySubmitted) return;
+    const roundStart = tournament.roundStartedAt ?? Date.now();
+    if (quizMatchId === myCurrentMatch.id) return;
+    setQuizMatchId(myCurrentMatch.id);
+    setQuizPos(0);
+    setQuizScore(0);
+    setQuizStartAt(roundStart);
+    setQuizDeadlineAt(roundStart + ROUND_DURATION_MS);
+    setQuizSelected(null);
+    setQuizFeedback(null);
+  }, [tournament, myCurrentMatch, currentRoundQuestionOrder.length, profile.id, quizMatchId]);
+
+  useEffect(() => {
+    if (!quizMatchId || quizDeadlineAt === null || quizSecondsLeft > 0) return;
+    submitMatchQuizScore();
+  }, [quizMatchId, quizDeadlineAt, quizSecondsLeft]);
+
+  useEffect(() => {
+    if (!tournament || tournament.status !== 'in-progress' || !tournament.roundStartedAt || autoResolvingRound) return;
+    if (Date.now() < tournament.roundStartedAt + ROUND_DURATION_MS) return;
+
+    const active = activeRoundMatches(tournament);
+    if (!active.some(m => m.status === 'in-progress')) return;
+
+    let players = tournament.players;
+    const matches = tournament.matches.map(match => {
+      if (match.round !== tournament.currentRound || match.status !== 'in-progress' || !match.playerAId || !match.playerBId) {
+        return match;
+      }
+
+      const scoreA = match.scoreA ?? 0;
+      const scoreB = match.scoreB ?? 0;
+      const timeA = match.playerATimeMs ?? (ROUND_DURATION_MS + 1);
+      const timeB = match.playerBTimeMs ?? (ROUND_DURATION_MS + 1);
+      const winnerId = scoreA > scoreB ? match.playerAId : scoreB > scoreA ? match.playerBId : (timeA <= timeB ? match.playerAId : match.playerBId);
+      const loserId = winnerId === match.playerAId ? match.playerBId : match.playerAId;
+
+      players = players.map(p => {
+        if (p.id === match.playerAId) {
+          return { ...p, totalScore: p.totalScore + scoreA, status: p.id === loserId ? 'eliminated' as PlayerStatus : p.status };
+        }
+        if (p.id === match.playerBId) {
+          return { ...p, totalScore: p.totalScore + scoreB, status: p.id === loserId ? 'eliminated' as PlayerStatus : p.status };
+        }
+        return p;
+      });
+
+      return {
+        ...match,
+        scoreA,
+        scoreB,
+        playerATimeMs: timeA,
+        playerBTimeMs: timeB,
+        winnerId,
+        loserId,
+        status: 'finished' as MatchStatus,
+      };
+    });
+
+    const advanced = computeNextStateAfterRound({ ...tournament, players, matches });
+    setAutoResolvingRound(true);
+    persist(advanced).finally(() => setAutoResolvingRound(false));
+  }, [tournament, autoResolvingRound]);
 
   const leaveTournament = async () => {
     if (!tournament) return;
@@ -830,6 +912,7 @@ export default function CopaCristaoPage({ profile, onClose }: { profile: Profile
               <div className="rounded-2xl bg-indigo-950/70 border border-indigo-300/30 p-4">
                 <p className="text-xs uppercase tracking-[0.2em] text-indigo-200 font-bold">Partida em andamento</p>
                 <p className="mt-1 text-white font-black">Pergunta {quizPos + 1}/{currentRoundQuestionOrder.length}</p>
+                <p className="mt-1 text-indigo-200 text-xs font-bold">Tempo restante: {Math.floor(quizSecondsLeft / 60)}:{String(quizSecondsLeft % 60).padStart(2, '0')}</p>
                 <p className="mt-3 text-white font-semibold">{quizQuestion.question}</p>
                 {quizFeedback && (
                   <p className={`mt-2 text-sm font-black ${quizFeedback === 'correct' ? 'text-emerald-300' : 'text-red-300'}`}>
@@ -923,13 +1006,15 @@ export default function CopaCristaoPage({ profile, onClose }: { profile: Profile
                 <div className="rounded-2xl bg-white/5 border border-white/10 p-4">
                   <div className="flex items-center justify-between mb-3">
                     <p className="text-white font-black text-lg">Rodada {tournament.currentRound}</p>
-                    {tournament.status === 'interval' ? <p className="text-amber-300 font-bold">Aguardando organizador</p> : <p className="text-blue-300 font-bold">{tournament.status === 'finished' ? 'Finalizado' : 'Ao vivo'}</p>}
+                    {tournament.status === 'interval'
+                      ? <p className="text-amber-300 font-bold">Aguardando organizador</p>
+                      : <p className="text-blue-300 font-bold">{tournament.status === 'finished' ? 'Finalizado' : `Ao vivo · ${Math.floor(Math.max(0, ROUND_DURATION_SECONDS - Math.floor((now - (tournament.roundStartedAt || now)) / 1000)) / 60)}:${String(Math.max(0, ROUND_DURATION_SECONDS - Math.floor((now - (tournament.roundStartedAt || now)) / 1000)) % 60).padStart(2, '0')}`}</p>}
                   </div>
                   {currentRoundQuestionOrder.length > 0 && (
                     <p className="mb-3 text-xs text-emerald-300 font-bold">Sequencia sincronizada da rodada: {currentRoundQuestionOrder.length} perguntas (mesma ordem para todos)</p>
                   )}
                   <div className="space-y-3">
-                    {currentMatches.map(match => {
+                    {visibleMatches.map(match => {
                       const pa = playerById(tournament, match.playerAId);
                       const pb = playerById(tournament, match.playerBId);
                       const isMyMatch = match.playerAId === profile.id || match.playerBId === profile.id;
@@ -966,9 +1051,7 @@ export default function CopaCristaoPage({ profile, onClose }: { profile: Profile
                               {mySubmitted ? (
                                 <p className="text-xs font-bold text-emerald-300">Sua pontuacao ja foi enviada. Aguardando adversario.</p>
                               ) : (
-                                <button onClick={() => startMatchQuiz(match)} className="rounded-lg bg-indigo-500 px-3 py-1.5 text-xs text-white font-black">
-                                  Responder perguntas
-                                </button>
+                                <p className="text-xs font-bold text-indigo-200">Rodada sincronizada: todos jogam ao mesmo tempo por 2 minutos.</p>
                               )}
                             </div>
                           )}

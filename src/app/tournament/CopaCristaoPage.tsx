@@ -565,7 +565,7 @@ export default function CopaCristaoPage({ profile, onClose }: { profile: Profile
     setQuizFeedback(null);
   };
 
-  const submitMatchQuizScore = async () => {
+  const submitMatchQuizScore = async (finalScore?: number) => {
     if (!tournament || !quizMatchId || quizStartAt === null) return;
     const target = tournament.matches.find(m => m.id === quizMatchId);
     if (!target || !target.playerAId || !target.playerBId) return;
@@ -577,12 +577,13 @@ export default function CopaCristaoPage({ profile, onClose }: { profile: Profile
     if (!isPlayerA && !isPlayerB) return;
 
     const myTimeMs = Math.max(1, Date.now() - quizStartAt);
+    const effectiveScore = typeof finalScore === 'number' ? finalScore : quizScore;
     const withMySubmission = tournament.matches.map(m => {
       if (m.id !== quizMatchId) return m;
       return {
         ...m,
-        scoreA: isPlayerA ? quizScore : m.scoreA,
-        scoreB: isPlayerB ? quizScore : m.scoreB,
+        scoreA: isPlayerA ? effectiveScore : m.scoreA,
+        scoreB: isPlayerB ? effectiveScore : m.scoreB,
         playerATimeMs: isPlayerA ? myTimeMs : (m.playerATimeMs ?? null),
         playerBTimeMs: isPlayerB ? myTimeMs : (m.playerBTimeMs ?? null),
       };
@@ -650,14 +651,14 @@ export default function CopaCristaoPage({ profile, onClose }: { profile: Profile
     setQuizSelected(optionIndex);
     const correct = optionIndex === quizQuestion.correctAnswer;
     setQuizFeedback(correct ? 'correct' : 'wrong');
-    if (correct) {
-      setQuizScore(prev => prev + (POINTS[quizQuestion.difficulty] ?? 100));
-    }
+    const earnedPoints = correct ? (POINTS[quizQuestion.difficulty] ?? 100) : 0;
+    const nextScore = quizScore + earnedPoints;
+    if (correct) setQuizScore(nextScore);
 
     window.setTimeout(async () => {
       const isLast = quizPos >= currentRoundQuestionOrder.length - 1;
       if (isLast) {
-        await submitMatchQuizScore();
+        await submitMatchQuizScore(nextScore);
       } else {
         setQuizPos(prev => prev + 1);
         setQuizSelected(null);

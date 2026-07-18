@@ -46,6 +46,8 @@ type Match = {
   winnerId: string | null;
   loserId: string | null;
   status: MatchStatus;
+  playerATimeMs?: number | null;
+  playerBTimeMs?: number | null;
 };
 
 type TournamentState = {
@@ -72,6 +74,12 @@ type TournamentState = {
 };
 
 const ROUND_QUESTION_COUNT = 10;
+const POINTS: Record<string, number> = {
+  'Fácil': 100,
+  'Médio': 200,
+  'Difícil': 300,
+  'Expert': 500,
+};
 
 function uid(prefix: string) {
   return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
@@ -307,11 +315,19 @@ export default function CopaCristaoPage({ profile, onClose }: { profile: Profile
   const [friends, setFriends] = useState<Friendship[]>([]);
   const [msg, setMsg] = useState<string | null>(null);
   const [now, setNow] = useState(Date.now());
+  const [quizMatchId, setQuizMatchId] = useState<string | null>(null);
+  const [quizPos, setQuizPos] = useState(0);
+  const [quizScore, setQuizScore] = useState(0);
+  const [quizStartAt, setQuizStartAt] = useState<number | null>(null);
+  const [quizSelected, setQuizSelected] = useState<number | null>(null);
+  const [quizFeedback, setQuizFeedback] = useState<'correct' | 'wrong' | null>(null);
 
   const isOrganizer = tournament?.organizerId === profile.id;
   const currentMatches = tournament ? activeRoundMatches(tournament) : [];
   const currentRoundQuestionOrder = tournament ? (tournament.roundQuestionOrders[String(tournament.currentRound)] || []) : [];
   const ranking = useMemo(() => (tournament ? [...tournament.players].sort((a, b) => b.totalScore - a.totalScore) : []), [tournament]);
+  const quizQuestionIndex = quizMatchId && quizPos < currentRoundQuestionOrder.length ? currentRoundQuestionOrder[quizPos] : null;
+  const quizQuestion = quizQuestionIndex !== null ? questions[quizQuestionIndex] : null;
 
   async function refreshGlobal() {
     const [openRows, myInvites, fr] = await Promise.all([
@@ -526,6 +542,130 @@ export default function CopaCristaoPage({ profile, onClose }: { profile: Profile
     await persist(advanced);
   };
 
+  const startMatchQuiz = (match: Match) => {
+    if (!tournament || tournament.status !== 'in-progress') return;
+    const isMyMatch = match.playerAId === profile.id || match.playerBId === profile.id;
+    if (!isMyMatch || match.status !== 'in-progress') return;
+    if (!currentRoundQuestionOrder.length) {
+      setMsg('Sequencia de perguntas indisponivel para esta rodada.');
+      return;
+    }
+
+    const alreadySubmitted = match.playerAId === profile.id ? match.scoreA !== null : match.scoreB !== null;
+    if (alreadySubmitted) {
+      setMsg('Sua pontuacao desta partida ja foi enviada.');
+      return;
+    }
+
+    setQuizMatchId(match.id);
+    setQuizPos(0);
+    setQuizScore(0);
+    setQuizStartAt(Date.now());
+    setQuizSelected(null);
+    setQuizFeedback(null);
+  };
+
+  const submitMatchQuizScore = async () => {
+    if (!tournament || !quizMatchId || quizStartAt === null) return;
+    const target = tournament.matches.find(m => m.id === quizMatchId);
+    if (!target || !target.playerAId || !target.playerBId) return;
+    const playerAId = target.playerAId;
+    const playerBId = target.playerBId;
+
+    const isPlayerA = target.playerAId === profile.id;
+    const isPlayerB = target.playerBId === profile.id;
+    if (!isPlayerA && !isPlayerB) return;
+
+    const myTimeMs = Math.max(1, Date.now() - quizStartAt);
+    const withMySubmission = tournament.matches.map(m => {
+      if (m.id !== quizMatchId) return m;
+      return {
+        ...m,
+        scoreA: isPlayerA ? quizScore : m.scoreA,
+        scoreB: isPlayerB ? quizScore : m.scoreB,
+        playerATimeMs: isPlayerA ? myTimeMs : (m.playerATimeMs ?? null),
+        playerBTimeMs: isPlayerB ? myTimeMs : (m.playerBTimeMs ?? null),
+      };
+    });
+
+    const updatedTarget = withMySubmission.find(m => m.id === quizMatchId);
+    if (!updatedTarget) return;
+
+    let players = tournament.players;
+    let matches = withMySubmission;
+    const bothSubmitted = updatedTarget.scoreA !== null && updatedTarget.scoreB !== null;
+
+    if (bothSubmitted) {
+      const scoreA = updatedTarget.scoreA ?? 0;
+      const scoreB = updatedTarget.scoreB ?? 0;
+      let winnerId: string;
+      let loserId: string;
+
+      if (scoreA > scoreB) {
+        winnerId = playerAId;
+        loserId = playerBId;
+      } else if (scoreB > scoreA) {
+        winnerId = playerBId;
+        loserId = playerAId;
+      } else {
+        const timeA = updatedTarget.playerATimeMs ?? Number.MAX_SAFE_INTEGER;
+        const timeB = updatedTarget.playerBTimeMs ?? Number.MAX_SAFE_INTEGER;
+        if (timeA <= timeB) {
+          winnerId = playerAId;
+          loserId = playerBId;
+        } else {
+          winnerId = playerBId;
+          loserId = playerAId;
+        }
+      }
+
+      matches = matches.map(m => m.id === updatedTarget.id
+        ? { ...m, winnerId, loserId, status: 'finished' as MatchStatus }
+        : m);
+
+      players = tournament.players.map(p => {
+        if (p.id === playerAId) {
+          return { ...p, totalScore: p.totalScore + scoreA, status: p.id === loserId ? 'eliminated' as PlayerStatus : p.status };
+        }
+        if (p.id === playerBId) {
+          return { ...p, totalScore: p.totalScore + scoreB, status: p.id === loserId ? 'eliminated' as PlayerStatus : p.status };
+        }
+        return p;
+      });
+    }
+
+    setQuizMatchId(null);
+    setQuizPos(0);
+    setQuizScore(0);
+    setQuizStartAt(null);
+    setQuizSelected(null);
+    setQuizFeedback(null);
+
+    const advanced = computeNextStateAfterRound({ ...tournament, players, matches });
+    await persist(advanced);
+  };
+
+  const answerQuizQuestion = (optionIndex: number) => {
+    if (!quizQuestion || quizSelected !== null) return;
+    setQuizSelected(optionIndex);
+    const correct = optionIndex === quizQuestion.correctAnswer;
+    setQuizFeedback(correct ? 'correct' : 'wrong');
+    if (correct) {
+      setQuizScore(prev => prev + (POINTS[quizQuestion.difficulty] ?? 100));
+    }
+
+    window.setTimeout(async () => {
+      const isLast = quizPos >= currentRoundQuestionOrder.length - 1;
+      if (isLast) {
+        await submitMatchQuizScore();
+      } else {
+        setQuizPos(prev => prev + 1);
+        setQuizSelected(null);
+        setQuizFeedback(null);
+      }
+    }, 500);
+  };
+
   const startNextRound = async () => {
     if (!tournament || tournament.status !== 'interval' || !isOrganizer) return;
     const hasScheduledInCurrent = tournament.matches.some(m => m.round === tournament.currentRound && m.status === 'scheduled');
@@ -685,6 +825,40 @@ export default function CopaCristaoPage({ profile, onClose }: { profile: Profile
 
         {view === 'room' && tournament && (
           <div className="space-y-6">
+            {quizMatchId && quizQuestion && (
+              <div className="rounded-2xl bg-indigo-950/70 border border-indigo-300/30 p-4">
+                <p className="text-xs uppercase tracking-[0.2em] text-indigo-200 font-bold">Partida em andamento</p>
+                <p className="mt-1 text-white font-black">Pergunta {quizPos + 1}/{currentRoundQuestionOrder.length}</p>
+                <p className="mt-3 text-white font-semibold">{quizQuestion.question}</p>
+                {quizFeedback && (
+                  <p className={`mt-2 text-sm font-black ${quizFeedback === 'correct' ? 'text-emerald-300' : 'text-red-300'}`}>
+                    {quizFeedback === 'correct' ? 'Correto' : 'Errado'}
+                  </p>
+                )}
+                <div className="mt-3 grid gap-2">
+                  {quizQuestion.options.map((opt, idx) => {
+                    const answered = quizSelected !== null;
+                    const isCorrect = idx === quizQuestion.correctAnswer;
+                    const isSelected = idx === quizSelected;
+                    const cls = answered
+                      ? (isCorrect ? 'bg-emerald-500/30 border-emerald-300 text-emerald-100' : isSelected ? 'bg-red-500/30 border-red-300 text-red-100' : 'bg-white/5 border-white/10 text-white/50')
+                      : 'bg-white/10 border-white/20 text-white hover:bg-white/20';
+                    return (
+                      <button
+                        key={idx}
+                        disabled={answered}
+                        onClick={() => answerQuizQuestion(idx)}
+                        className={`rounded-xl border px-3 py-2 text-left text-sm font-semibold transition-all ${cls}`}
+                      >
+                        <span className="mr-2 font-black opacity-60">{String.fromCharCode(65 + idx)}.</span>{opt}
+                      </button>
+                    );
+                  })}
+                </div>
+                <p className="mt-3 text-xs text-indigo-200 font-bold">Pontuacao parcial: {quizScore}</p>
+              </div>
+            )}
+
             <div className="rounded-2xl bg-white/5 border border-white/10 p-4 flex flex-wrap gap-3 items-center justify-between">
               <div>
                 <p className="text-white font-black text-xl">{tournament.name} - {tournament.code}</p>
@@ -757,6 +931,10 @@ export default function CopaCristaoPage({ profile, onClose }: { profile: Profile
                     {currentMatches.map(match => {
                       const pa = playerById(tournament, match.playerAId);
                       const pb = playerById(tournament, match.playerBId);
+                      const isMyMatch = match.playerAId === profile.id || match.playerBId === profile.id;
+                      const mySubmitted = match.playerAId === profile.id
+                        ? match.scoreA !== null
+                        : (match.playerBId === profile.id ? match.scoreB !== null : false);
                       let sa = match.scoreA ?? 0;
                       let sb = match.scoreB ?? 0;
                       return (
@@ -782,6 +960,17 @@ export default function CopaCristaoPage({ profile, onClose }: { profile: Profile
                               <p className="text-white font-bold">{match.scoreA ?? '-'} x {match.scoreB ?? '-'}</p>
                             )}
                           </div>
+                          {tournament.status === 'in-progress' && match.status === 'in-progress' && isMyMatch && pa && pb && (
+                            <div className="mt-2">
+                              {mySubmitted ? (
+                                <p className="text-xs font-bold text-emerald-300">Sua pontuacao ja foi enviada. Aguardando adversario.</p>
+                              ) : (
+                                <button onClick={() => startMatchQuiz(match)} className="rounded-lg bg-indigo-500 px-3 py-1.5 text-xs text-white font-black">
+                                  Responder perguntas
+                                </button>
+                              )}
+                            </div>
+                          )}
                           {match.winnerId && <p className="mt-1 text-emerald-300 text-xs">Vencedor: {playerById(tournament, match.winnerId)?.name}</p>}
                         </div>
                       );

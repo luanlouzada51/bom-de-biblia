@@ -74,7 +74,6 @@ type TournamentState = {
   updatedAt?: number;
 };
 
-const ROUND_QUESTION_COUNT = 10;
 const ROUND_DURATION_SECONDS = 120;
 const ROUND_DURATION_MS = ROUND_DURATION_SECONDS * 1000;
 const POINTS: Record<string, number> = {
@@ -131,8 +130,7 @@ function buildRoundQuestionOrder(tournamentId: string, round: number): number[] 
   if (!total) return [];
   const indexes = Array.from({ length: total }, (_, i) => i);
   const seed = hashSeed(`${tournamentId}:${round}`);
-  const count = Math.min(ROUND_QUESTION_COUNT, total);
-  return seededShuffle(indexes, seed).slice(0, count);
+  return seededShuffle(indexes, seed);
 }
 
 function toPlayer(profile: Profile): Player {
@@ -338,12 +336,23 @@ export default function CopaCristaoPage({ profile, onClose }: { profile: Profile
   const ranking = useMemo(() => (tournament ? [...tournament.players].sort((a, b) => b.totalScore - a.totalScore) : []), [tournament]);
   const myCurrentMatch = useMemo(() => {
     if (!tournament) return null;
-    return currentMatches.find(m => (m.playerAId === profile.id || m.playerBId === profile.id) && m.status === 'in-progress') || null;
+    return currentMatches.find(
+      m => (m.playerAId === profile.id || m.playerBId === profile.id)
+        && m.status !== 'finished'
+        && m.status !== 'walkover',
+    ) || null;
   }, [tournament, currentMatches, profile.id]);
-  const visibleMatches = useMemo(() => {
+  const bracketVisibleMatches = useMemo(() => {
     if (!tournament) return [] as Match[];
-    return isOrganizer ? currentMatches : currentMatches.filter(m => m.playerAId === profile.id || m.playerBId === profile.id);
-  }, [tournament, isOrganizer, currentMatches, profile.id]);
+    const scope = isOrganizer
+      ? tournament.matches
+      : tournament.matches.filter(m => m.playerAId === profile.id || m.playerBId === profile.id);
+    return [...scope].sort((a, b) => {
+      if (a.round !== b.round) return a.round - b.round;
+      if (a.bracket !== b.bracket) return a.bracket === 'main' ? -1 : 1;
+      return a.label.localeCompare(b.label);
+    });
+  }, [tournament, isOrganizer, profile.id]);
   const quizQuestionIndex = quizMatchId && quizPos < currentRoundQuestionOrder.length ? currentRoundQuestionOrder[quizPos] : null;
   const quizQuestion = quizQuestionIndex !== null ? questions[quizQuestionIndex] : null;
   const quizSecondsLeft = quizDeadlineAt ? Math.max(0, Math.ceil((quizDeadlineAt - localNow) / 1000)) : 0;
@@ -666,14 +675,16 @@ export default function CopaCristaoPage({ profile, onClose }: { profile: Profile
     if (!correct) setQuizDeadlineAt(prev => (prev ? Math.max(Date.now(), prev - 3000) : prev));
 
     window.setTimeout(async () => {
-      const isLast = quizPos >= currentRoundQuestionOrder.length - 1;
-      if (isLast) {
+      if (quizDeadlineAt !== null && Date.now() >= quizDeadlineAt) {
         await submitMatchQuizScore(nextScore);
-      } else {
-        setQuizPos(prev => prev + 1);
-        setQuizSelected(null);
-        setQuizFeedback(null);
+        return;
       }
+      setQuizPos(prev => {
+        if (!currentRoundQuestionOrder.length) return 0;
+        return (prev + 1) % currentRoundQuestionOrder.length;
+      });
+      setQuizSelected(null);
+      setQuizFeedback(null);
     }, 500);
   };
 
@@ -692,14 +703,14 @@ export default function CopaCristaoPage({ profile, onClose }: { profile: Profile
   };
 
   useEffect(() => {
-    if (!tournament || tournament.status !== 'in-progress' || !myCurrentMatch || !currentRoundQuestionOrder.length) {
+    if (!tournament || tournament.status !== 'in-progress' || !myCurrentMatch || !currentRoundQuestionOrder.length || !tournament.roundStartedAt) {
       return;
     }
     const alreadySubmitted = myCurrentMatch.playerAId === profile.id
       ? myCurrentMatch.scoreA !== null
       : myCurrentMatch.scoreB !== null;
     if (alreadySubmitted) return;
-    const roundStart = tournament.roundStartedAt ?? Date.now();
+    const roundStart = tournament.roundStartedAt;
     if (quizMatchId === myCurrentMatch.id) return;
     setQuizMatchId(myCurrentMatch.id);
     setQuizPos(0);
@@ -911,7 +922,7 @@ export default function CopaCristaoPage({ profile, onClose }: { profile: Profile
             {quizMatchId && quizQuestion && (
               <div className="rounded-2xl bg-indigo-950/70 border border-indigo-300/30 p-4">
                 <p className="text-xs uppercase tracking-[0.2em] text-indigo-200 font-bold">Partida em andamento</p>
-                <p className="mt-1 text-white font-black">Pergunta {quizPos + 1}/{currentRoundQuestionOrder.length}</p>
+                <p className="mt-1 text-white font-black">Pergunta ativa da rodada</p>
                 <p className="mt-1 text-indigo-200 text-xs font-bold">Tempo restante: {Math.floor(quizSecondsLeft / 60)}:{String(quizSecondsLeft % 60).padStart(2, '0')}</p>
                 <p className="mt-3 text-white font-semibold">{quizQuestion.question}</p>
                 {quizFeedback && (
@@ -1010,52 +1021,80 @@ export default function CopaCristaoPage({ profile, onClose }: { profile: Profile
                       ? <p className="text-amber-300 font-bold">Aguardando organizador</p>
                       : <p className="text-blue-300 font-bold">{tournament.status === 'finished' ? 'Finalizado' : `Ao vivo · ${Math.floor(Math.max(0, ROUND_DURATION_SECONDS - Math.floor((now - (tournament.roundStartedAt || now)) / 1000)) / 60)}:${String(Math.max(0, ROUND_DURATION_SECONDS - Math.floor((now - (tournament.roundStartedAt || now)) / 1000)) % 60).padStart(2, '0')}`}</p>}
                   </div>
-                  {currentRoundQuestionOrder.length > 0 && (
-                    <p className="mb-3 text-xs text-emerald-300 font-bold">Sequencia sincronizada da rodada: {currentRoundQuestionOrder.length} perguntas (mesma ordem para todos)</p>
-                  )}
+                  <p className="mb-3 text-xs text-emerald-300 font-bold">Rodada por tempo: todos respondem simultaneamente por 2 minutos.</p>
                   <div className="space-y-3">
-                    {visibleMatches.map(match => {
-                      const pa = playerById(tournament, match.playerAId);
-                      const pb = playerById(tournament, match.playerBId);
-                      const isMyMatch = match.playerAId === profile.id || match.playerBId === profile.id;
-                      const mySubmitted = match.playerAId === profile.id
-                        ? match.scoreA !== null
-                        : (match.playerBId === profile.id ? match.scoreB !== null : false);
-                      let sa = match.scoreA ?? 0;
-                      let sb = match.scoreB ?? 0;
+                    {Array.from(new Set(bracketVisibleMatches.map(m => m.round))).map(round => {
+                      const roundMatches = bracketVisibleMatches.filter(m => m.round === round);
                       return (
-                        <div key={match.id} className="rounded-xl border border-white/10 bg-slate-950/40 p-3">
-                          <p className="text-white/50 text-xs uppercase">{match.label} - {match.bracket === 'main' ? 'Principal' : '3º lugar'}</p>
-                          <div className="mt-2 grid grid-cols-[1fr,auto] gap-2 items-center">
-                            <p className="text-white text-sm">{pa ? `${pa.avatar} ${pa.name}` : '-'} x {pb ? `${pb.avatar} ${pb.name}` : '-'}</p>
-                            {isOrganizer && tournament.status === 'in-progress' && match.status !== 'finished' && match.status !== 'walkover' && pa && pb ? (
-                              <div className="flex gap-1 items-center">
-                                <input type="number" min={0} defaultValue={sa} onChange={e => { sa = Math.max(0, Number(e.target.value) || 0); }} className="w-14 rounded bg-white/10 text-white text-sm p-1" />
-                                <span className="text-white">x</span>
-                                <input type="number" min={0} defaultValue={sb} onChange={e => { sb = Math.max(0, Number(e.target.value) || 0); }} className="w-14 rounded bg-white/10 text-white text-sm p-1" />
-                                <button onClick={() => {
-                                  if (sa === sb) {
-                                    const chooseA = window.confirm('Empate. OK = vence A / Cancelar = vence B');
-                                    finishMatch(match.id, sa, sb, chooseA ? pa.id : pb.id);
-                                    return;
-                                  }
-                                  finishMatch(match.id, sa, sb);
-                                }} className="rounded bg-emerald-500 px-2 py-1 text-xs text-white font-bold">Finalizar</button>
-                              </div>
-                            ) : (
-                              <p className="text-white font-bold">{match.scoreA ?? '-'} x {match.scoreB ?? '-'}</p>
-                            )}
+                        <div key={round} className="rounded-xl border border-white/10 bg-slate-900/30 p-3">
+                          <p className="text-white/70 text-xs uppercase tracking-[0.2em]">Rodada {round} {round === tournament.currentRound ? '· atual' : '· encerrada'}</p>
+                          <div className="mt-3 space-y-3">
+                            {roundMatches.map(match => {
+                              const pa = playerById(tournament, match.playerAId);
+                              const pb = playerById(tournament, match.playerBId);
+                              const isMyMatch = match.playerAId === profile.id || match.playerBId === profile.id;
+                              const mySubmitted = match.playerAId === profile.id
+                                ? match.scoreA !== null
+                                : (match.playerBId === profile.id ? match.scoreB !== null : false);
+                              const statusLabel = match.status === 'in-progress'
+                                ? 'EM JOGO'
+                                : match.status === 'scheduled'
+                                  ? 'AGUARDANDO'
+                                  : 'ENCERRADO';
+                              const statusClass = match.status === 'in-progress'
+                                ? 'bg-emerald-500/20 text-emerald-200 border-emerald-300/30'
+                                : match.status === 'scheduled'
+                                  ? 'bg-amber-500/20 text-amber-200 border-amber-300/30'
+                                  : 'bg-slate-500/20 text-slate-200 border-slate-300/30';
+                              let sa = match.scoreA ?? 0;
+                              let sb = match.scoreB ?? 0;
+
+                              return (
+                                <div key={match.id} className="rounded-xl border border-white/10 bg-slate-950/40 p-3">
+                                  <div className="flex items-center justify-between gap-2">
+                                    <p className="text-white/60 text-xs uppercase">{match.label} - {match.bracket === 'main' ? 'Chave principal' : '3º lugar'}</p>
+                                    <span className={`rounded-full border px-2 py-0.5 text-[10px] font-black ${statusClass}`}>{statusLabel}</span>
+                                  </div>
+                                  <p className="mt-2 text-white text-sm font-semibold">{pa ? `${pa.avatar} ${pa.name}` : '-'} <span className="text-white/50">vs</span> {pb ? `${pb.avatar} ${pb.name}` : '-'}</p>
+
+                                  <div className="mt-2 grid grid-cols-[1fr,auto] items-center gap-2">
+                                    <p className="text-white/70 text-xs">Placar</p>
+                                    {isOrganizer && tournament.status === 'in-progress' && round === tournament.currentRound && match.status !== 'finished' && match.status !== 'walkover' && pa && pb ? (
+                                      <div className="flex gap-1 items-center">
+                                        <input type="number" min={0} defaultValue={sa} onChange={e => { sa = Math.max(0, Number(e.target.value) || 0); }} className="w-14 rounded bg-white/10 text-white text-sm p-1" />
+                                        <span className="text-white">x</span>
+                                        <input type="number" min={0} defaultValue={sb} onChange={e => { sb = Math.max(0, Number(e.target.value) || 0); }} className="w-14 rounded bg-white/10 text-white text-sm p-1" />
+                                        <button onClick={() => {
+                                          if (sa === sb) {
+                                            const chooseA = window.confirm('Empate. OK = vence A / Cancelar = vence B');
+                                            finishMatch(match.id, sa, sb, chooseA ? pa.id : pb.id);
+                                            return;
+                                          }
+                                          finishMatch(match.id, sa, sb);
+                                        }} className="rounded bg-emerald-500 px-2 py-1 text-xs text-white font-bold">Finalizar</button>
+                                      </div>
+                                    ) : (
+                                      <p className="text-white font-bold">{match.scoreA ?? '-'} x {match.scoreB ?? '-'}</p>
+                                    )}
+                                  </div>
+
+                                  {tournament.status === 'in-progress' && round === tournament.currentRound && match.status === 'in-progress' && isMyMatch && pa && pb && (
+                                    <div className="mt-2">
+                                      {mySubmitted ? (
+                                        <p className="text-xs font-bold text-emerald-300">Sua pontuacao ja foi enviada. Aguardando adversario.</p>
+                                      ) : (
+                                        <p className="text-xs font-bold text-indigo-200">Confronto ativo: resposta por tempo (2 minutos).</p>
+                                      )}
+                                    </div>
+                                  )}
+
+                                  {match.winnerId && (
+                                    <p className="mt-1 text-emerald-300 text-xs font-bold">Vencedor: {playerById(tournament, match.winnerId)?.name || '-'}</p>
+                                  )}
+                                </div>
+                              );
+                            })}
                           </div>
-                          {tournament.status === 'in-progress' && match.status === 'in-progress' && isMyMatch && pa && pb && (
-                            <div className="mt-2">
-                              {mySubmitted ? (
-                                <p className="text-xs font-bold text-emerald-300">Sua pontuacao ja foi enviada. Aguardando adversario.</p>
-                              ) : (
-                                <p className="text-xs font-bold text-indigo-200">Rodada sincronizada: todos jogam ao mesmo tempo por 2 minutos.</p>
-                              )}
-                            </div>
-                          )}
-                          {match.winnerId && <p className="mt-1 text-emerald-300 text-xs">Vencedor: {playerById(tournament, match.winnerId)?.name}</p>}
                         </div>
                       );
                     })}

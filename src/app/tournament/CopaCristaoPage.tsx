@@ -99,6 +99,17 @@ function toPlayer(profile: Profile): Player {
   };
 }
 
+function normalizePlayers(players: Player[], size?: number): Player[] {
+  const unique: Player[] = [];
+  const seen = new Set<string>();
+  for (const player of players) {
+    if (seen.has(player.id)) continue;
+    seen.add(player.id);
+    unique.push(player);
+  }
+  return typeof size === 'number' ? unique.slice(0, size) : unique;
+}
+
 function labelByMatches(count: number, bracket: BracketType) {
   if (bracket === 'third') return 'Disputa de 3o lugar';
   if (count === 1) return 'Final';
@@ -140,15 +151,16 @@ function playerById(state: TournamentState, id: string | null) {
 
 function fromRow(row: TournamentStateRow): TournamentState {
   const state = (row.state || {}) as Partial<TournamentState>;
+  const size = state.size || 16;
   return {
     id: row.id,
     code: row.code,
     name: row.name,
     organizerId: row.organizer_id,
     organizerName: state.organizerName || 'Organizador',
-    size: state.size || 16,
+    size,
     thirdPlaceEnabled: !!state.thirdPlaceEnabled,
-    players: state.players || [],
+    players: normalizePlayers(state.players || [], size),
     matches: state.matches || [],
     status: row.status,
     currentRound: state.currentRound || 0,
@@ -294,7 +306,7 @@ export default function CopaCristaoPage({ profile, onClose }: { profile: Profile
   }
 
   async function persist(next: TournamentState) {
-    const normalized = { ...next };
+    const normalized = { ...next, players: normalizePlayers(next.players, next.size) };
     if (normalized.status === 'interval' && normalized.intervalEndsAt && normalized.intervalEndsAt <= Date.now()) {
       normalized.status = 'in-progress';
       normalized.intervalEndsAt = null;
@@ -422,10 +434,11 @@ export default function CopaCristaoPage({ profile, onClose }: { profile: Profile
 
   const startTournament = async () => {
     if (!tournament) return;
-    if (tournament.players.length < 4) return setMsg('Mínimo de 4 jogadores');
-    if (tournament.players.length !== tournament.size) return setMsg(`Precisa completar ${tournament.size} jogadores`);
+    const participants = normalizePlayers(tournament.players, tournament.size);
+    if (participants.length < 4) return setMsg('Mínimo de 4 jogadores');
+    if (participants.length < tournament.size) return setMsg(`Precisa completar ${tournament.size} jogadores`);
 
-    const seeded = shuffle(tournament.players.map(p => p.id));
+    const seeded = shuffle(participants.map(p => p.id));
     const firstRound = buildMatches(seeded, 1, 'main').map(m => ({ ...m, status: m.status === 'scheduled' ? 'in-progress' : m.status }));
     const next: TournamentState = {
       ...tournament,
@@ -434,7 +447,7 @@ export default function CopaCristaoPage({ profile, onClose }: { profile: Profile
       currentRound: 1,
       startedAt: Date.now(),
       intervalEndsAt: null,
-      players: tournament.players.map(p => ({ ...p, totalScore: 0, status: 'joined', eliminatedAtRound: undefined })),
+      players: participants.map(p => ({ ...p, totalScore: 0, status: 'joined', eliminatedAtRound: undefined })),
       championId: null,
       runnerUpId: null,
       thirdPlaceId: null,

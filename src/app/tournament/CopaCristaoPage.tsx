@@ -399,6 +399,33 @@ export default function CopaCristaoPage({ profile, onClose }: { profile: Profile
     else setMsg(err);
   }
 
+  async function ensurePlayerJoined(base: TournamentState): Promise<{ state: TournamentState | null; error: string | null }> {
+    for (let attempt = 0; attempt < 4; attempt += 1) {
+      const row = await getTournamentStateById(base.id);
+      if (!row) return { state: null, error: 'Torneio indisponível' };
+      const latest = fromRow(row);
+
+      if (latest.status !== 'waiting') return { state: null, error: 'Esse torneio já iniciou' };
+      if (latest.players.some(p => p.id === profile.id)) return { state: latest, error: null };
+
+      const mergedPlayers = normalizePlayers([...latest.players, toPlayer(profile)], latest.size);
+      if (mergedPlayers.length > latest.size || (mergedPlayers.length === latest.players.length && !mergedPlayers.some(p => p.id === profile.id))) {
+        return { state: null, error: 'Torneio cheio' };
+      }
+
+      const next = { ...latest, players: mergedPlayers };
+      const err = await updateTournamentState(next.id, toStatePayload(next), next.status);
+      if (err) return { state: null, error: err };
+
+      const verifyRow = await getTournamentStateById(base.id);
+      if (!verifyRow) return { state: next, error: null };
+      const verified = fromRow(verifyRow);
+      if (verified.players.some(p => p.id === profile.id)) return { state: verified, error: null };
+    }
+
+    return { state: null, error: 'Não foi possível entrar no torneio. Tente novamente.' };
+  }
+
   useEffect(() => {
     refreshGlobal();
   }, []);
@@ -483,13 +510,9 @@ export default function CopaCristaoPage({ profile, onClose }: { profile: Profile
     const row = await getTournamentStateByCode(joinCode.trim());
     if (!row) return setMsg('Torneio não encontrado');
     const state = fromRow(row);
-    if (state.status !== 'waiting') return setMsg('Esse torneio já iniciou');
-    if (!state.players.some(p => p.id === profile.id)) {
-      if (state.players.length >= state.size) return setMsg('Torneio cheio');
-      state.players = [...state.players, toPlayer(profile)];
-      await persist(state);
-    }
-    setTournament(state);
+    const joined = await ensurePlayerJoined(state);
+    if (!joined.state) return setMsg(joined.error || 'Não foi possível entrar no torneio');
+    setTournament(joined.state);
     setView('room');
     refreshGlobal();
   };
@@ -509,14 +532,10 @@ export default function CopaCristaoPage({ profile, onClose }: { profile: Profile
     const row = await getTournamentStateById(invite.tournament_id);
     if (!row) return setMsg('Torneio indisponível');
     const state = fromRow(row);
-    if (state.status !== 'waiting') return setMsg('Torneio já iniciado');
-    if (!state.players.some(p => p.id === profile.id)) {
-      if (state.players.length >= state.size) return setMsg('Torneio cheio');
-      state.players = [...state.players, toPlayer(profile)];
-      await persist(state);
-    }
+    const joined = await ensurePlayerJoined(state);
+    if (!joined.state) return setMsg(joined.error || 'Não foi possível entrar no torneio');
     await respondTournamentInvite(invite.id, 'accepted');
-    setTournament(state);
+    setTournament(joined.state);
     setView('room');
     refreshGlobal();
   };
@@ -528,18 +547,23 @@ export default function CopaCristaoPage({ profile, onClose }: { profile: Profile
 
   const startTournament = async () => {
     if (!tournament) return;
-    const participants = normalizePlayers(tournament.players, tournament.size);
+    const row = await getTournamentStateById(tournament.id);
+    if (!row) return setMsg('Torneio indisponível');
+    const latest = fromRow(row);
+    if (latest.status !== 'waiting') return setMsg('Esse torneio já iniciou');
+
+    const participants = normalizePlayers(latest.players, latest.size);
     if (participants.length < 4) return setMsg('Mínimo de 4 jogadores');
-    if (participants.length < tournament.size) return setMsg(`Precisa completar ${tournament.size} jogadores`);
+    if (participants.length < latest.size) return setMsg(`Precisa completar ${latest.size} jogadores`);
 
     const seeded = shuffle(participants.map(p => p.id));
     const firstRound = buildMatches(seeded, 1, 'main').map(m => ({ ...m, status: m.status === 'scheduled' ? 'in-progress' : m.status }));
     const roundQuestionOrders = {
-      ...tournament.roundQuestionOrders,
-      '1': tournament.roundQuestionOrders['1'] || buildRoundQuestionOrder(tournament.id, 1),
+      ...latest.roundQuestionOrders,
+      '1': latest.roundQuestionOrders['1'] || buildRoundQuestionOrder(latest.id, 1),
     };
     const next: TournamentState = {
-      ...tournament,
+      ...latest,
       matches: firstRound,
       status: 'in-progress',
       currentRound: 1,

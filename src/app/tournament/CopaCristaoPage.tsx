@@ -17,6 +17,7 @@ import {
   TournamentStateStatus,
   updateTournamentState,
 } from '../../utils/supabaseClient';
+import { questions } from '../data/questions';
 
 type View = 'menu' | 'organize' | 'join' | 'room';
 type PlayerStatus = 'joined' | 'eliminated' | 'withdrawn' | 'champion' | 'runner-up' | 'third' | 'fourth';
@@ -66,10 +67,11 @@ type TournamentState = {
   runnerUpId: string | null;
   thirdPlaceId: string | null;
   fourthPlaceId: string | null;
+  roundQuestionOrders: Record<string, number[]>;
   updatedAt?: number;
 };
 
-const ROUND_INTERVAL_MS = 3 * 60 * 1000;
+const ROUND_QUESTION_COUNT = 10;
 
 function uid(prefix: string) {
   return `${prefix}-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
@@ -86,6 +88,40 @@ function shuffle<T>(arr: T[]) {
     [a[i], a[j]] = [a[j], a[i]];
   }
   return a;
+}
+
+function hashSeed(input: string) {
+  let hash = 2166136261;
+  for (let i = 0; i < input.length; i += 1) {
+    hash ^= input.charCodeAt(i);
+    hash = Math.imul(hash, 16777619);
+  }
+  return hash >>> 0;
+}
+
+function seededShuffle<T>(arr: T[], seed: number): T[] {
+  const a = [...arr];
+  let s = seed || 1;
+  const rand = () => {
+    s ^= s << 13;
+    s ^= s >>> 17;
+    s ^= s << 5;
+    return ((s >>> 0) % 1000000) / 1000000;
+  };
+  for (let i = a.length - 1; i > 0; i -= 1) {
+    const j = Math.floor(rand() * (i + 1));
+    [a[i], a[j]] = [a[j], a[i]];
+  }
+  return a;
+}
+
+function buildRoundQuestionOrder(tournamentId: string, round: number): number[] {
+  const total = questions.length;
+  if (!total) return [];
+  const indexes = Array.from({ length: total }, (_, i) => i);
+  const seed = hashSeed(`${tournamentId}:${round}`);
+  const count = Math.min(ROUND_QUESTION_COUNT, total);
+  return seededShuffle(indexes, seed).slice(0, count);
 }
 
 function toPlayer(profile: Profile): Player {
@@ -171,6 +207,7 @@ function fromRow(row: TournamentStateRow): TournamentState {
     runnerUpId: state.runnerUpId ?? null,
     thirdPlaceId: state.thirdPlaceId ?? null,
     fourthPlaceId: state.fourthPlaceId ?? null,
+    roundQuestionOrders: state.roundQuestionOrders || {},
     updatedAt: row.updated_at ? new Date(row.updated_at).getTime() : Date.now(),
   };
 }
@@ -190,6 +227,7 @@ function toStatePayload(state: TournamentState) {
     runnerUpId: state.runnerUpId,
     thirdPlaceId: state.thirdPlaceId,
     fourthPlaceId: state.fourthPlaceId,
+    roundQuestionOrders: state.roundQuestionOrders,
   };
 }
 
@@ -242,21 +280,19 @@ function computeNextStateAfterRound(state: TournamentState): TournamentState {
   const nextRound = state.currentRound + 1;
   const nextMain = buildMatches(winners, nextRound, 'main');
   const nextThird = state.thirdPlaceEnabled && main.length === 2 ? buildMatches(losers, nextRound, 'third') : [];
+  const roundQuestionOrders = {
+    ...state.roundQuestionOrders,
+    [String(nextRound)]: state.roundQuestionOrders[String(nextRound)] || buildRoundQuestionOrder(state.id, nextRound),
+  };
 
   return {
     ...state,
     matches: [...state.matches, ...nextMain, ...nextThird],
     currentRound: nextRound,
     status: 'interval',
-    intervalEndsAt: Date.now() + ROUND_INTERVAL_MS,
+    intervalEndsAt: null,
+    roundQuestionOrders,
   };
-}
-
-function remainingText(ms: number) {
-  const seconds = Math.max(0, Math.ceil(ms / 1000));
-  const m = Math.floor(seconds / 60);
-  const s = seconds % 60;
-  return `${m}:${String(s).padStart(2, '0')}`;
 }
 
 export default function CopaCristaoPage({ profile, onClose }: { profile: Profile; onClose: () => void }) {
@@ -274,6 +310,7 @@ export default function CopaCristaoPage({ profile, onClose }: { profile: Profile
 
   const isOrganizer = tournament?.organizerId === profile.id;
   const currentMatches = tournament ? activeRoundMatches(tournament) : [];
+  const currentRoundQuestionOrder = tournament ? (tournament.roundQuestionOrders[String(tournament.currentRound)] || []) : [];
   const ranking = useMemo(() => (tournament ? [...tournament.players].sort((a, b) => b.totalScore - a.totalScore) : []), [tournament]);
 
   async function refreshGlobal() {
@@ -355,6 +392,7 @@ export default function CopaCristaoPage({ profile, onClose }: { profile: Profile
       runnerUpId: null,
       thirdPlaceId: null,
       fourthPlaceId: null,
+      roundQuestionOrders: {},
     };
 
     const result = await createTournamentState(initial.code, initial.name, profile.id, {
@@ -371,6 +409,7 @@ export default function CopaCristaoPage({ profile, onClose }: { profile: Profile
       runnerUpId: initial.runnerUpId,
       thirdPlaceId: initial.thirdPlaceId,
       fourthPlaceId: initial.fourthPlaceId,
+      roundQuestionOrders: initial.roundQuestionOrders,
     }, 'waiting');
 
     if (!result.row) {
@@ -440,6 +479,10 @@ export default function CopaCristaoPage({ profile, onClose }: { profile: Profile
 
     const seeded = shuffle(participants.map(p => p.id));
     const firstRound = buildMatches(seeded, 1, 'main').map(m => ({ ...m, status: m.status === 'scheduled' ? 'in-progress' : m.status }));
+    const roundQuestionOrders = {
+      ...tournament.roundQuestionOrders,
+      '1': tournament.roundQuestionOrders['1'] || buildRoundQuestionOrder(tournament.id, 1),
+    };
     const next: TournamentState = {
       ...tournament,
       matches: firstRound,
@@ -452,6 +495,7 @@ export default function CopaCristaoPage({ profile, onClose }: { profile: Profile
       runnerUpId: null,
       thirdPlaceId: null,
       fourthPlaceId: null,
+      roundQuestionOrders,
     };
     await persist(next);
   };
@@ -482,8 +526,10 @@ export default function CopaCristaoPage({ profile, onClose }: { profile: Profile
     await persist(advanced);
   };
 
-  const autoStartIntervalRound = async () => {
-    if (!tournament || tournament.status !== 'interval' || !tournament.intervalEndsAt || tournament.intervalEndsAt > Date.now()) return;
+  const startNextRound = async () => {
+    if (!tournament || tournament.status !== 'interval' || !isOrganizer) return;
+    const hasScheduledInCurrent = tournament.matches.some(m => m.round === tournament.currentRound && m.status === 'scheduled');
+    if (!hasScheduledInCurrent) return setMsg('Nenhuma partida pendente para iniciar nesta rodada.');
     const next: TournamentState = {
       ...tournament,
       status: 'in-progress',
@@ -492,10 +538,6 @@ export default function CopaCristaoPage({ profile, onClose }: { profile: Profile
     };
     await persist(next);
   };
-
-  useEffect(() => {
-    autoStartIntervalRound();
-  }, [tournament?.status, tournament?.intervalEndsAt, now]);
 
   const leaveTournament = async () => {
     if (!tournament) return;
@@ -706,8 +748,11 @@ export default function CopaCristaoPage({ profile, onClose }: { profile: Profile
                 <div className="rounded-2xl bg-white/5 border border-white/10 p-4">
                   <div className="flex items-center justify-between mb-3">
                     <p className="text-white font-black text-lg">Rodada {tournament.currentRound}</p>
-                    {tournament.status === 'interval' ? <p className="text-amber-300 font-bold">Próxima em {remainingText((tournament.intervalEndsAt || 0) - now)}</p> : <p className="text-blue-300 font-bold">{tournament.status === 'finished' ? 'Finalizado' : 'Ao vivo'}</p>}
+                    {tournament.status === 'interval' ? <p className="text-amber-300 font-bold">Aguardando organizador</p> : <p className="text-blue-300 font-bold">{tournament.status === 'finished' ? 'Finalizado' : 'Ao vivo'}</p>}
                   </div>
+                  {currentRoundQuestionOrder.length > 0 && (
+                    <p className="mb-3 text-xs text-emerald-300 font-bold">Sequencia sincronizada da rodada: {currentRoundQuestionOrder.length} perguntas (mesma ordem para todos)</p>
+                  )}
                   <div className="space-y-3">
                     {currentMatches.map(match => {
                       const pa = playerById(tournament, match.playerAId);
@@ -742,6 +787,17 @@ export default function CopaCristaoPage({ profile, onClose }: { profile: Profile
                       );
                     })}
                   </div>
+
+                  {tournament.status === 'interval' && (
+                    <div className="mt-4 rounded-xl bg-amber-500/10 border border-amber-300/20 p-3">
+                      <p className="text-amber-100 text-sm font-bold">Todos os confrontos da rodada foram finalizados.</p>
+                      {isOrganizer ? (
+                        <button onClick={startNextRound} className="mt-2 rounded-lg bg-emerald-500 px-3 py-2 text-white text-sm font-black">Iniciar proxima rodada</button>
+                      ) : (
+                        <p className="mt-2 text-xs text-amber-200">Aguardando o organizador iniciar a proxima rodada.</p>
+                      )}
+                    </div>
+                  )}
 
                   {tournament.status === 'finished' && (
                     <div className="mt-4 rounded-xl bg-white/10 p-3">

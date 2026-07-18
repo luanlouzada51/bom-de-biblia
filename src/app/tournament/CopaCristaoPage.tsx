@@ -15,6 +15,7 @@ import {
   TournamentInviteRow,
   TournamentStateRow,
   TournamentStateStatus,
+  closeExpiredEmptyWaitingTournaments,
   updateTournamentState,
 } from '../../utils/supabaseClient';
 import { questions } from '../data/questions';
@@ -76,6 +77,7 @@ type TournamentState = {
 
 const ROUND_DURATION_SECONDS = 120;
 const ROUND_DURATION_MS = ROUND_DURATION_SECONDS * 1000;
+const EMPTY_WAITING_AUTO_CANCEL_MINUTES = 10;
 const POINTS: Record<string, number> = {
   'Fácil': 100,
   'Médio': 200,
@@ -358,6 +360,9 @@ export default function CopaCristaoPage({ profile, onClose }: { profile: Profile
   const quizSecondsLeft = quizDeadlineAt ? Math.max(0, Math.ceil((quizDeadlineAt - localNow) / 1000)) : 0;
 
   async function refreshGlobal() {
+    const cleanupErr = await closeExpiredEmptyWaitingTournaments(EMPTY_WAITING_AUTO_CANCEL_MINUTES);
+    if (cleanupErr) setMsg(cleanupErr);
+
     const [openRows, myInvites, fr] = await Promise.all([
       listOpenTournamentStates(),
       listTournamentInvitesForUser(profile.id),
@@ -580,36 +585,14 @@ export default function CopaCristaoPage({ profile, onClose }: { profile: Profile
     await persist(next);
   };
 
-  const finishMatch = async (matchId: string, scoreA: number, scoreB: number, tiedWinnerId?: string | null) => {
-    if (!tournament) return;
-    const target = tournament.matches.find(m => m.id === matchId);
-    if (!target || !target.playerAId || !target.playerBId) return;
-
-    let winnerId: string | null = null;
-    let loserId: string | null = null;
-    if (scoreA > scoreB) { winnerId = target.playerAId; loserId = target.playerBId; }
-    else if (scoreB > scoreA) { winnerId = target.playerBId; loserId = target.playerAId; }
-    else if (tiedWinnerId && [target.playerAId, target.playerBId].includes(tiedWinnerId)) {
-      winnerId = tiedWinnerId;
-      loserId = tiedWinnerId === target.playerAId ? target.playerBId : target.playerAId;
-    }
-    if (!winnerId || !loserId) return setMsg('Empate: escolha o vencedor');
-
-    const players = tournament.players.map(p => {
-      if (p.id === target.playerAId) return { ...p, totalScore: p.totalScore + scoreA, status: p.id === loserId ? 'eliminated' as PlayerStatus : p.status };
-      if (p.id === target.playerBId) return { ...p, totalScore: p.totalScore + scoreB, status: p.id === loserId ? 'eliminated' as PlayerStatus : p.status };
-      return p;
-    });
-
-    const matches = tournament.matches.map(m => m.id === matchId ? { ...m, scoreA, scoreB, winnerId, loserId, status: 'finished' as MatchStatus } : m);
-    const advanced = computeNextStateAfterRound({ ...tournament, players, matches });
-    await persist(advanced);
-  };
-
   const submitMatchQuizScore = async (finalScore?: number) => {
     if (!tournament || !quizMatchId || quizStartAt === null) return;
-    const target = tournament.matches.find(m => m.id === quizMatchId);
+    const latestRow = await getTournamentStateById(tournament.id);
+    if (!latestRow) return;
+    const liveState = fromRow(latestRow);
+    const target = liveState.matches.find(m => m.id === quizMatchId);
     if (!target || !target.playerAId || !target.playerBId) return;
+    if (target.status === 'finished' || target.status === 'walkover') return;
     const playerAId = target.playerAId;
     const playerBId = target.playerBId;
 
@@ -619,8 +602,10 @@ export default function CopaCristaoPage({ profile, onClose }: { profile: Profile
 
     const myTimeMs = Math.max(1, Date.now() - quizStartAt);
     const effectiveScore = typeof finalScore === 'number' ? finalScore : quizScore;
-    const withMySubmission = tournament.matches.map(m => {
+    const withMySubmission = liveState.matches.map(m => {
       if (m.id !== quizMatchId) return m;
+      if (isPlayerA && m.scoreA !== null) return m;
+      if (isPlayerB && m.scoreB !== null) return m;
       return {
         ...m,
         scoreA: isPlayerA ? effectiveScore : m.scoreA,
@@ -633,7 +618,7 @@ export default function CopaCristaoPage({ profile, onClose }: { profile: Profile
     const updatedTarget = withMySubmission.find(m => m.id === quizMatchId);
     if (!updatedTarget) return;
 
-    let players = tournament.players;
+    let players = liveState.players;
     let matches = withMySubmission;
     const bothSubmitted = updatedTarget.scoreA !== null && updatedTarget.scoreB !== null;
 
@@ -665,7 +650,7 @@ export default function CopaCristaoPage({ profile, onClose }: { profile: Profile
         ? { ...m, winnerId, loserId, status: 'finished' as MatchStatus }
         : m);
 
-      players = tournament.players.map(p => {
+      players = liveState.players.map(p => {
         if (p.id === playerAId) {
           return { ...p, totalScore: p.totalScore + scoreA, status: p.id === loserId ? 'eliminated' as PlayerStatus : p.status };
         }
@@ -684,7 +669,7 @@ export default function CopaCristaoPage({ profile, onClose }: { profile: Profile
     setQuizSelected(null);
     setQuizFeedback(null);
 
-    const advanced = computeNextStateAfterRound({ ...tournament, players, matches });
+    const advanced = computeNextStateAfterRound({ ...liveState, players, matches });
     await persist(advanced);
   };
 
@@ -926,11 +911,9 @@ export default function CopaCristaoPage({ profile, onClose }: { profile: Profile
                       const row = await getTournamentStateById(t.id);
                       if (!row) return;
                       const latest = fromRow(row);
-                      if (!latest.players.some(p => p.id === profile.id)) {
-                        latest.players = [...latest.players, toPlayer(profile)];
-                        await persist(latest);
-                      }
-                      setTournament(latest);
+                      const joined = await ensurePlayerJoined(latest);
+                      if (!joined.state) return setMsg(joined.error || 'Não foi possível entrar no torneio');
+                      setTournament(joined.state);
                       setView('room');
                     }} className="rounded-lg bg-blue-500 px-3 py-1.5 text-white text-xs font-bold">Entrar</button>
                   </div>
@@ -1070,9 +1053,6 @@ export default function CopaCristaoPage({ profile, onClose }: { profile: Profile
                                 : match.status === 'scheduled'
                                   ? 'bg-amber-500/20 text-amber-200 border-amber-300/30'
                                   : 'bg-slate-500/20 text-slate-200 border-slate-300/30';
-                              let sa = match.scoreA ?? 0;
-                              let sb = match.scoreB ?? 0;
-
                               return (
                                 <div key={match.id} className="rounded-xl border border-white/10 bg-slate-950/40 p-3">
                                   <div className="flex items-center justify-between gap-2">
@@ -1083,23 +1063,7 @@ export default function CopaCristaoPage({ profile, onClose }: { profile: Profile
 
                                   <div className="mt-2 grid grid-cols-[1fr,auto] items-center gap-2">
                                     <p className="text-white/70 text-xs">Placar</p>
-                                    {isOrganizer && tournament.status === 'in-progress' && round === tournament.currentRound && match.status !== 'finished' && match.status !== 'walkover' && pa && pb ? (
-                                      <div className="flex gap-1 items-center">
-                                        <input type="number" min={0} defaultValue={sa} onChange={e => { sa = Math.max(0, Number(e.target.value) || 0); }} className="w-14 rounded bg-white/10 text-white text-sm p-1" />
-                                        <span className="text-white">x</span>
-                                        <input type="number" min={0} defaultValue={sb} onChange={e => { sb = Math.max(0, Number(e.target.value) || 0); }} className="w-14 rounded bg-white/10 text-white text-sm p-1" />
-                                        <button onClick={() => {
-                                          if (sa === sb) {
-                                            const chooseA = window.confirm('Empate. OK = vence A / Cancelar = vence B');
-                                            finishMatch(match.id, sa, sb, chooseA ? pa.id : pb.id);
-                                            return;
-                                          }
-                                          finishMatch(match.id, sa, sb);
-                                        }} className="rounded bg-emerald-500 px-2 py-1 text-xs text-white font-bold">Finalizar</button>
-                                      </div>
-                                    ) : (
-                                      <p className="text-white font-bold">{match.scoreA ?? '-'} x {match.scoreB ?? '-'}</p>
-                                    )}
+                                    <p className="text-white font-bold">{match.scoreA ?? '-'} x {match.scoreB ?? '-'}</p>
                                   </div>
 
                                   {tournament.status === 'in-progress' && round === tournament.currentRound && match.status === 'in-progress' && isMyMatch && pa && pb && (

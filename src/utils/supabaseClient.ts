@@ -463,6 +463,65 @@ export async function listOpenTournamentStates(): Promise<TournamentStateRow[]> 
   return ((data as TournamentStateRow[]) ?? []);
 }
 
+export async function closeExpiredEmptyWaitingTournaments(maxIdleMinutes = 10): Promise<AuthError> {
+  const cutoffMs = Date.now() - Math.max(1, maxIdleMinutes) * 60 * 1000;
+
+  const isStaleAndEmpty = (row: TournamentStateRow) => {
+    const updatedMs = Date.parse(row.updated_at || row.created_at || '');
+    const players = Array.isArray((row.state as any)?.players) ? ((row.state as any).players as any[]) : [];
+    return Number.isFinite(updatedMs) && updatedMs <= cutoffMs && players.length === 0;
+  };
+
+  try {
+    const { data, error } = await supabase
+      .from('tournament_states')
+      .select('*')
+      .eq('status', 'waiting')
+      .limit(200);
+
+    if (error) {
+      const msg = extractMessage(error);
+      if (isMissingTournamentTables(msg)) {
+        const rows = readFallbackRows<TournamentStateRow>(TOURNAMENT_STATE_FALLBACK_KEY);
+        const nextRows = rows.map(row => {
+          if (row.status !== 'waiting') return row;
+          if (!isStaleAndEmpty(row)) return row;
+          return { ...row, status: 'cancelled' as TournamentStateStatus, updated_at: nowIso() };
+        });
+        writeFallbackRows(TOURNAMENT_STATE_FALLBACK_KEY, nextRows);
+        return null;
+      }
+      return msg;
+    }
+
+    const waitingRows = (data as TournamentStateRow[]) ?? [];
+    const staleRows = waitingRows.filter(isStaleAndEmpty);
+    for (const row of staleRows) {
+      const { error: updateError } = await supabase
+        .from('tournament_states')
+        .update({ status: 'cancelled' as TournamentStateStatus })
+        .eq('id', row.id)
+        .eq('status', 'waiting');
+      if (updateError) return extractMessage(updateError);
+    }
+
+    return null;
+  } catch (e: any) {
+    const msg = extractMessage(e);
+    if (isMissingTournamentTables(msg)) {
+      const rows = readFallbackRows<TournamentStateRow>(TOURNAMENT_STATE_FALLBACK_KEY);
+      const nextRows = rows.map(row => {
+        if (row.status !== 'waiting') return row;
+        if (!isStaleAndEmpty(row)) return row;
+        return { ...row, status: 'cancelled' as TournamentStateStatus, updated_at: nowIso() };
+      });
+      writeFallbackRows(TOURNAMENT_STATE_FALLBACK_KEY, nextRows);
+      return null;
+    }
+    return msg;
+  }
+}
+
 export async function updateTournamentState(
   id: string,
   state: Record<string, any>,

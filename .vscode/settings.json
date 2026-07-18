@@ -1,5 +1,9 @@
 {
     "chat.tools.terminal.autoApprove": {
-        "Test-Path": true
+        "Test-Path": true,
+        "/^git -C \"C:/Users/luanl/OneDrive/Desktop/bom-de-biblia\" remote -v$/": {
+            "approve": true,
+            "matchCommandLine": true
+        }
     }
 }

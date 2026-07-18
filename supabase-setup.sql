@@ -105,10 +105,146 @@ BEGIN
 END;
 $$ LANGUAGE plpgsql;
 
+CREATE OR REPLACE FUNCTION validate_tournament_state_update()
+RETURNS TRIGGER AS $$
+DECLARE
+  uid UUID := auth.uid();
+  old_state JSONB := COALESCE(OLD.state, '{}'::jsonb);
+  new_state JSONB := COALESCE(NEW.state, '{}'::jsonb);
+  old_players JSONB := COALESCE(old_state->'players', '[]'::jsonb);
+  new_players JSONB := COALESCE(new_state->'players', '[]'::jsonb);
+  old_matches JSONB := COALESCE(old_state->'matches', '[]'::jsonb);
+  new_matches JSONB := COALESCE(new_state->'matches', '[]'::jsonb);
+  old_item JSONB;
+  new_item JSONB;
+  pid TEXT;
+BEGIN
+  IF uid IS NULL THEN
+    RAISE EXCEPTION 'Auth obrigatoria';
+  END IF;
+
+  -- Organizadores podem controlar fluxo do torneio (inicio/rodadas/final).
+  IF uid = OLD.organizer_id THEN
+    RETURN NEW;
+  END IF;
+
+  -- Jogadores nao organizadores: em lobby, apenas podem adicionar a si mesmos.
+  IF OLD.status = 'waiting' THEN
+    IF NEW.status IS DISTINCT FROM OLD.status THEN
+      RAISE EXCEPTION 'Somente o organizador pode alterar status';
+    END IF;
+
+    IF (new_state - 'players') IS DISTINCT FROM (old_state - 'players') THEN
+      RAISE EXCEPTION 'Atualizacao invalida do estado do torneio';
+    END IF;
+
+    FOR old_item IN SELECT value FROM jsonb_array_elements(old_players)
+    LOOP
+      pid := old_item->>'id';
+      IF pid IS NULL OR pid = '' THEN CONTINUE; END IF;
+      IF NOT EXISTS (
+        SELECT 1 FROM jsonb_array_elements(new_players) p WHERE p->>'id' = pid
+      ) THEN
+        RAISE EXCEPTION 'Nao e permitido remover jogadores';
+      END IF;
+    END LOOP;
+
+    FOR new_item IN SELECT value FROM jsonb_array_elements(new_players)
+    LOOP
+      pid := new_item->>'id';
+      IF pid IS NULL OR pid = '' THEN CONTINUE; END IF;
+      IF NOT EXISTS (
+        SELECT 1 FROM jsonb_array_elements(old_players) p WHERE p->>'id' = pid
+      ) AND pid <> uid::text THEN
+        RAISE EXCEPTION 'Voce so pode adicionar seu proprio jogador';
+      END IF;
+    END LOOP;
+
+    RETURN NEW;
+  END IF;
+
+  -- Fora do lobby, jogador comum nao pode alterar estrutura de fase.
+  IF OLD.status <> 'in-progress' THEN
+    RAISE EXCEPTION 'Somente o organizador pode alterar este estado';
+  END IF;
+
+  IF NEW.status IS DISTINCT FROM OLD.status THEN
+    RAISE EXCEPTION 'Somente o organizador pode alterar status';
+  END IF;
+
+  IF (new_state - 'matches') IS DISTINCT FROM (old_state - 'matches') THEN
+    RAISE EXCEPTION 'Somente placar proprio pode ser enviado';
+  END IF;
+
+  FOR old_item IN SELECT value FROM jsonb_array_elements(old_matches)
+  LOOP
+    new_item := (
+      SELECT value
+      FROM jsonb_array_elements(new_matches) m
+      WHERE m->>'id' = old_item->>'id'
+      LIMIT 1
+    );
+
+    IF new_item IS NULL THEN
+      RAISE EXCEPTION 'Atualizacao invalida de partida';
+    END IF;
+
+    IF new_item IS DISTINCT FROM old_item THEN
+      IF COALESCE(old_item->>'playerAId', '') <> uid::text AND COALESCE(old_item->>'playerBId', '') <> uid::text THEN
+        RAISE EXCEPTION 'Voce so pode atualizar sua propria partida';
+      END IF;
+
+      IF COALESCE(new_item->>'winnerId', '') IS DISTINCT FROM COALESCE(old_item->>'winnerId', '')
+         OR COALESCE(new_item->>'loserId', '') IS DISTINCT FROM COALESCE(old_item->>'loserId', '')
+         OR COALESCE(new_item->>'status', '') IS DISTINCT FROM COALESCE(old_item->>'status', '')
+         OR COALESCE(new_item->>'playerAId', '') IS DISTINCT FROM COALESCE(old_item->>'playerAId', '')
+         OR COALESCE(new_item->>'playerBId', '') IS DISTINCT FROM COALESCE(old_item->>'playerBId', '') THEN
+        RAISE EXCEPTION 'Somente o organizador pode definir vencedor e status da partida';
+      END IF;
+
+      IF COALESCE(old_item->>'playerAId', '') = uid::text THEN
+        IF COALESCE(new_item->>'scoreB', '') IS DISTINCT FROM COALESCE(old_item->>'scoreB', '')
+           OR COALESCE(new_item->>'playerBTimeMs', '') IS DISTINCT FROM COALESCE(old_item->>'playerBTimeMs', '') THEN
+          RAISE EXCEPTION 'Nao pode alterar dados do adversario';
+        END IF;
+
+        IF COALESCE(old_item->>'scoreA', '') <> '' THEN
+          RAISE EXCEPTION 'Pontuacao ja enviada';
+        END IF;
+
+        IF COALESCE(new_item->>'scoreA', '') = '' THEN
+          RAISE EXCEPTION 'Pontuacao invalida';
+        END IF;
+      ELSE
+        IF COALESCE(new_item->>'scoreA', '') IS DISTINCT FROM COALESCE(old_item->>'scoreA', '')
+           OR COALESCE(new_item->>'playerATimeMs', '') IS DISTINCT FROM COALESCE(old_item->>'playerATimeMs', '') THEN
+          RAISE EXCEPTION 'Nao pode alterar dados do adversario';
+        END IF;
+
+        IF COALESCE(old_item->>'scoreB', '') <> '' THEN
+          RAISE EXCEPTION 'Pontuacao ja enviada';
+        END IF;
+
+        IF COALESCE(new_item->>'scoreB', '') = '' THEN
+          RAISE EXCEPTION 'Pontuacao invalida';
+        END IF;
+      END IF;
+    END IF;
+  END LOOP;
+
+  RETURN NEW;
+END;
+$$ LANGUAGE plpgsql;
+
 DROP TRIGGER IF EXISTS trg_tournament_states_updated_at ON tournament_states;
 CREATE TRIGGER trg_tournament_states_updated_at
 BEFORE UPDATE ON tournament_states
 FOR EACH ROW EXECUTE FUNCTION set_updated_at_timestamp();
+
+DROP TRIGGER IF EXISTS trg_tournament_states_guard ON tournament_states;
+CREATE TRIGGER trg_tournament_states_guard
+BEFORE UPDATE ON tournament_states
+FOR EACH ROW EXECUTE FUNCTION validate_tournament_state_update();
 
 -- ── RLS ──────────────────────────────────────────────────────────────────────
 ALTER TABLE profiles ENABLE ROW LEVEL SECURITY;

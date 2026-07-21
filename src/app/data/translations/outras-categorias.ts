@@ -73,7 +73,7 @@ export const outrasCategoriasTranslations: QuestionTranslations = {
 
     // CARTAS - FÁCIL (260-261) - 2 perguntas
     260: { question: "Who wrote most of the epistles in the New Testament?", options: ["Peter", "Paul", "John", "James"], verse: "Paul wrote 13 epistles" },
-    261: { question: "Which is the love chapter?", options: ["Romans 8", "1 Corinthians 13", "Ephesians 3", "Philippians 4"], verse: "1 Corinthians 13 - The love chapter" }
+    261: { question: "Which letter says we should resist the devil and he will flee?", options: ["Ephesians", "1 Peter", "James", "Jude"], verse: "James 4:7 - Resist the devil, and he will flee from you" }
   },
   es: {
     // HISTÓRICOS - FÁCIL (200-214) - 15 preguntas
@@ -146,6 +146,6 @@ export const outrasCategoriasTranslations: QuestionTranslations = {
 
     // CARTAS - FÁCIL (260-261) - 2 preguntas
     260: { question: "¿Quién escribió la mayoría de las epístolas en el Nuevo Testamento?", options: ["Pedro", "Pablo", "Juan", "Santiago"], verse: "Pablo escribió 13 epístolas" },
-    261: { question: "¿Cuál es el capítulo del amor?", options: ["Romanos 8", "1 Corintios 13", "Efesios 3", "Filipenses 4"], verse: "1 Corintios 13 - El capítulo del amor" }
+    261: { question: "¿Qué carta dice que debemos resistir al diablo y él huirá?", options: ["Efesios", "1 Pedro", "Santiago", "Judas"], verse: "Santiago 4:7 - Resiste al diablo, y él huirá de vosotros" }
   }
 };
